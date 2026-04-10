@@ -31,7 +31,7 @@
     "@types/node": "^20",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^18",
-    "@types/react-dom": "^18",
+    "@types/react-dom": "^19",
     "eslint": "^8",
     "eslint-config-next": "14.2.18",
     "prisma": "^5.22.0",
