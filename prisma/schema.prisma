@@ -1,0 +1,252 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  MANAGER
+}
+
+enum TimesheetStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  INVOICED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+}
+
+enum AuditAction {
+  USER_LOGIN
+  USER_LOGIN_FAILED
+  USER_LOGOUT
+  USER_LOCKED
+  MFA_SETUP
+  MFA_VERIFIED
+  MFA_FAILED
+  MFA_RECOVERY_USED
+  PASSWORD_CHANGED
+  TIMESHEET_CREATED
+  TIMESHEET_UPDATED
+  TIMESHEET_SUBMITTED
+  TIMESHEET_APPROVED
+  TIMESHEET_REJECTED
+  INVOICE_GENERATED
+  INVOICE_SENT
+  CLIENT_CREATED
+  CLIENT_UPDATED
+  APPROVAL_TOKEN_CREATED
+  APPROVAL_TOKEN_USED
+  APPROVAL_TOKEN_EXPIRED
+  ADMIN_ACTION
+  UNAUTHORISED_ACCESS
+  SETTINGS_CHANGED
+}
+
+// ---------------------------------------------------------------------------
+// Core application models
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  passwordHash  String    // argon2id hash
+  role          Role      @default(MANAGER)
+
+  // Brute-force protection
+  failedLogins  Int       @default(0)
+  lockedUntil   DateTime?
+
+  // MFA
+  mfaEnabled    Boolean   @default(false)
+  mfaSecretEnc  String?   // AES-256-GCM encrypted TOTP secret
+  mfaVerifiedAt DateTime? // Timestamp of first successful TOTP verification
+  recoveryCodes String[]  // argon2id-hashed single-use recovery codes
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  clients        Client[]
+  timesheets     Timesheet[]
+  auditLogs      AuditLog[]
+  approvalTokens ApprovalToken[]
+
+  // NextAuth
+  accounts       Account[]
+  sessions       Session[]
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  name      String
+  reference String?  // e.g. "GD-2024-001"
+  managerId String
+  manager   User     @relation(fields: [managerId], references: [id])
+
+  timesheets Timesheet[]
+  invoices   Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([managerId])
+}
+
+model Timesheet {
+  id          String          @id @default(cuid())
+  clientId    String
+  client      Client          @relation(fields: [clientId], references: [id])
+  managerId   String
+  manager     User            @relation(fields: [managerId], references: [id])
+  weekStart   DateTime        @db.Date
+  entries     TimesheetEntry[]
+  status      TimesheetStatus @default(DRAFT)
+
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  approvedBy  String?   // email of the client-side approver
+
+  invoiceId   String?
+
+  approvalTokens ApprovalToken[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([managerId])
+  @@index([clientId])
+  @@index([status])
+}
+
+model TimesheetEntry {
+  id          String    @id @default(cuid())
+  timesheetId String
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  date        DateTime  @db.Date
+  hours       Decimal   @db.Decimal(5, 2)
+  description String
+  receiptPath String?   // server-side path (never expose to client directly)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([timesheetId])
+}
+
+// Single-use HMAC-signed JWT approval tokens sent to clients
+model ApprovalToken {
+  id          String    @id @default(cuid())
+  jti         String    @unique // JWT ID — used for single-use enforcement
+  clientId    String
+  timesheetId String
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id])
+  createdById String
+  createdBy   User      @relation(fields: [createdById], references: [id])
+  usedAt      DateTime? // null = not yet used
+  expiresAt   DateTime
+
+  createdAt DateTime @default(now())
+
+  @@index([timesheetId])
+  @@index([jti])
+}
+
+model Invoice {
+  id                  String        @id @default(cuid())
+  clientId            String
+  client              Client        @relation(fields: [clientId], references: [id])
+  managerId           String
+  timesheetIds        String[]
+  xeroInvoiceId       String?
+  xeroAccessTokenEnc  String?       // AES-256-GCM encrypted
+  xeroRefreshTokenEnc String?       // AES-256-GCM encrypted
+  amount              Decimal       @db.Decimal(10, 2)
+  currency            String        @default("GBP")
+  status              InvoiceStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([managerId])
+  @@index([clientId])
+}
+
+// Immutable audit log — rows are never updated or deleted by the application
+model AuditLog {
+  id         String      @id @default(cuid())
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id])
+  action     AuditAction
+  resource   String      // e.g. "timesheet", "auth", "client"
+  resourceId String?
+  metadata   Json?       // sanitised — no passwords, no tokens
+  ipAddress  String?
+  userAgent  String?
+  success    Boolean
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// NextAuth required models
+// ---------------------------------------------------------------------------
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+// Database-backed sessions allow server-side revocation
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  mfaVerified  Boolean  @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}

@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  # npm — weekly security and version updates
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/London"
+    open-pull-requests-limit: 10
+    # Group patch updates together to reduce noise
+    groups:
+      patch-updates:
+        update-types:
+          - "patch"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+    # Automatically rebase stale PRs
+    rebase-strategy: "auto"
+
+  # GitHub Actions — keep runner versions current
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "07:00"
+      timezone: "Europe/London"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(ci)"
