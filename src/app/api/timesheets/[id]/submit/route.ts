@@ -19,8 +19,11 @@ import { AuditAction, Role, TimesheetStatus } from "@prisma/client"
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  // Next.js 15: params is a Promise
+  const { id } = await params
+
   const rl = await checkRateLimit(req, "api")
   if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
 
@@ -29,7 +32,7 @@ export async function POST(
   if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
 
   const timesheet = await getTimesheetForUser(
-    params.id,
+    id,
     session.user.id,
     session.user.role as Role
   )
@@ -39,7 +42,7 @@ export async function POST(
       userId: session.user.id,
       action: AuditAction.UNAUTHORISED_ACCESS,
       resource: "timesheet",
-      resourceId: params.id,
+      resourceId: id,
       metadata: { action: "submit" },
       ipAddress: getClientIp(req),
       success: false,
@@ -56,7 +59,7 @@ export async function POST(
 
   // Transition to SUBMITTED
   await db.timesheet.update({
-    where: { id: params.id },
+    where: { id },
     data: {
       status: TimesheetStatus.SUBMITTED,
       submittedAt: new Date(),
@@ -65,7 +68,7 @@ export async function POST(
 
   // Issue single-use approval token
   const token = await createApprovalToken({
-    timesheetId: params.id,
+    timesheetId: id,
     clientId: timesheet.clientId,
     createdById: session.user.id,
   })
@@ -74,7 +77,7 @@ export async function POST(
     userId: session.user.id,
     action: AuditAction.TIMESHEET_SUBMITTED,
     resource: "timesheet",
-    resourceId: params.id,
+    resourceId: id,
     metadata: { clientId: timesheet.clientId },
     ipAddress: getClientIp(req),
     userAgent: req.headers.get("user-agent") ?? undefined,
@@ -83,7 +86,7 @@ export async function POST(
 
   return NextResponse.json({
     ok: true,
-    timesheetId: params.id,
+    timesheetId: id,
     status: TimesheetStatus.SUBMITTED,
     // Embed this in the approval email link: /approve?token=<approvalToken>
     approvalToken: token,

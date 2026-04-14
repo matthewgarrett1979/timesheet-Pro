@@ -30,8 +30,11 @@ const bodySchema = z.object({
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { token: string } }
+  { params }: { params: Promise<{ token: string }> }
 ) {
+  // Next.js 15: params is a Promise
+  const { token } = await params
+
   const rl = await checkRateLimit(req, "approvals")
   if (rl.denied) {
     return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
@@ -52,7 +55,7 @@ export async function POST(
   // Verify and consume the token
   let verified: Awaited<ReturnType<typeof consumeApprovalToken>>
   try {
-    verified = await consumeApprovalToken(params.token)
+    verified = await consumeApprovalToken(token)
   } catch (err) {
     const reason = err instanceof Error ? err.message : "UNKNOWN"
     await audit({

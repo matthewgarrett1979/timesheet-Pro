@@ -30,15 +30,18 @@ async function getAuthedSession(req: NextRequest) {
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  // Next.js 15: params is a Promise
+  const { id } = await params
+
   const auth = await getAuthedSession(req)
   if ("error" in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
   const client = await getClientForUser(
-    params.id,
+    id,
     auth.session.user.id,
     auth.session.user.role as Role
   )
@@ -52,8 +55,11 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  // Next.js 15: params is a Promise
+  const { id } = await params
+
   const auth = await getAuthedSession(req)
   if ("error" in auth) {
     return NextResponse.json({ error: auth.error }, { status: auth.status })
@@ -61,7 +67,7 @@ export async function PATCH(
 
   // Verify ownership before updating
   const existing = await getClientForUser(
-    params.id,
+    id,
     auth.session.user.id,
     auth.session.user.role as Role
   )
@@ -71,7 +77,7 @@ export async function PATCH(
       userId: auth.session.user.id,
       action: AuditAction.UNAUTHORISED_ACCESS,
       resource: "client",
-      resourceId: params.id,
+      resourceId: id,
       metadata: { action: "update" },
       ipAddress: getClientIp(req),
       success: false,
@@ -87,7 +93,7 @@ export async function PATCH(
   }
 
   const updated = await db.client.update({
-    where: { id: params.id },
+    where: { id },
     data: body,
   })
 
@@ -95,7 +101,7 @@ export async function PATCH(
     userId: auth.session.user.id,
     action: AuditAction.CLIENT_UPDATED,
     resource: "client",
-    resourceId: params.id,
+    resourceId: id,
     metadata: { changes: body },
     ipAddress: getClientIp(req),
     userAgent: req.headers.get("user-agent") ?? undefined,

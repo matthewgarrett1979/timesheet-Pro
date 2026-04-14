@@ -28,8 +28,11 @@ const patchSchema = z.object({
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  // Next.js 15: params is a Promise
+  const { id } = await params
+
   const rl = await checkRateLimit(req, "api")
   if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
 
@@ -38,7 +41,7 @@ export async function GET(
   if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
 
   const timesheet = await getTimesheetForUser(
-    params.id,
+    id,
     session.user.id,
     session.user.role as Role
   )
@@ -52,8 +55,11 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  // Next.js 15: params is a Promise
+  const { id } = await params
+
   const rl = await checkRateLimit(req, "api")
   if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
 
@@ -62,7 +68,7 @@ export async function PATCH(
   if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
 
   const timesheet = await getTimesheetForUser(
-    params.id,
+    id,
     session.user.id,
     session.user.role as Role
   )
@@ -72,7 +78,7 @@ export async function PATCH(
       userId: session.user.id,
       action: AuditAction.UNAUTHORISED_ACCESS,
       resource: "timesheet",
-      resourceId: params.id,
+      resourceId: id,
       metadata: { action: "update" },
       ipAddress: getClientIp(req),
       success: false,
@@ -96,17 +102,17 @@ export async function PATCH(
 
   // Replace all entries atomically
   await db.$transaction([
-    db.timesheetEntry.deleteMany({ where: { timesheetId: params.id } }),
+    db.timesheetEntry.deleteMany({ where: { timesheetId: id } }),
     db.timesheetEntry.createMany({
       data: body.entries.map((e) => ({
-        timesheetId: params.id,
+        timesheetId: id,
         date: new Date(e.date),
         hours: e.hours,
         description: e.description,
       })),
     }),
     db.timesheet.update({
-      where: { id: params.id },
+      where: { id },
       data: { updatedAt: new Date() },
     }),
   ])
@@ -115,7 +121,7 @@ export async function PATCH(
     userId: session.user.id,
     action: AuditAction.TIMESHEET_UPDATED,
     resource: "timesheet",
-    resourceId: params.id,
+    resourceId: id,
     metadata: { entryCount: body.entries.length },
     ipAddress: getClientIp(req),
     userAgent: req.headers.get("user-agent") ?? undefined,
@@ -123,7 +129,7 @@ export async function PATCH(
   })
 
   const updated = await getTimesheetForUser(
-    params.id,
+    id,
     session.user.id,
     session.user.role as Role
   )
