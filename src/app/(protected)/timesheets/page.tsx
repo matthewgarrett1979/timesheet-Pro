@@ -30,7 +30,8 @@ interface TimesheetEntry {
 
 interface Timesheet {
   id: string
-  weekStart: string
+  periodStart: string
+  periodEnd: string
   status: string
   submittedAt: string | null
   approvedAt: string | null
@@ -194,7 +195,7 @@ function TimesheetsContent() {
                 return (
                   <tr key={ts.id}>
                     <td className="font-medium text-gray-900">{ts.client.name}</td>
-                    <td>{new Date(ts.weekStart).toLocaleDateString("en-GB")}</td>
+                    <td>{new Date(ts.periodStart).toLocaleDateString("en-GB")}</td>
                     <td className="text-gray-500 text-xs">
                       {entryProjects.length > 0 ? entryProjects.join(", ") : "—"}
                     </td>

@@ -13,9 +13,15 @@ import { AuditAction, Role } from "@prisma/client"
 import { z } from "zod"
 
 const updateSchema = z.object({
-  name: z.string().trim().min(1).max(200).optional(),
-  description: z.string().trim().max(1000).optional(),
-  active: z.boolean().optional(),
+  name:             z.string().trim().min(1).max(200).optional(),
+  description:      z.string().trim().max(1000).optional(),
+  active:           z.boolean().optional(),
+  billingType:      z.enum(["TM", "DRAWDOWN", "FIXED"]).optional(),
+  budgetHours:      z.number().positive().nullish(),
+  contingencyHours: z.number().positive().nullish(),
+  budgetValue:      z.number().positive().nullish(),
+  drawdownRate:     z.number().positive().nullish(),
+  rateOverride:     z.number().positive().nullish(),
 })
 
 export async function GET(

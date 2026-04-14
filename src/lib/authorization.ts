@@ -8,17 +8,13 @@
  * An ADMIN can read all resources but still cannot read another user's
  * encrypted secrets.
  */
-import { Role, TimesheetStatus } from "@prisma/client"
+import { Role, TimesheetStatus, TimeEntryStatus } from "@prisma/client"
 import { db } from "./db"
 
 // ---------------------------------------------------------------------------
 // Client authorisation
 // ---------------------------------------------------------------------------
 
-/**
- * Return a client only if the caller owns it (or is ADMIN).
- * Returns null if not found or not authorised.
- */
 export async function getClientForUser(clientId: string, userId: string, role: Role) {
   return db.client.findFirst({
     where: {
@@ -28,9 +24,6 @@ export async function getClientForUser(clientId: string, userId: string, role: R
   })
 }
 
-/**
- * List clients scoped to the calling user (ADMINs see all).
- */
 export async function listClientsForUser(userId: string, role: Role) {
   return db.client.findMany({
     where: role !== Role.ADMIN ? { managerId: userId } : {},
@@ -39,12 +32,92 @@ export async function listClientsForUser(userId: string, role: Role) {
 }
 
 // ---------------------------------------------------------------------------
+// Time entry authorisation
+// ---------------------------------------------------------------------------
+
+const TIME_ENTRY_INCLUDE = {
+  client:   { select: { id: true, name: true, reference: true, defaultRate: true } },
+  project:  { select: { id: true, name: true, rateOverride: true, billingType: true } },
+  phase:    { select: { id: true, name: true } },
+  category: { select: { id: true, name: true, colour: true, isBillable: true } },
+} as const
+
+export async function getTimeEntryForUser(
+  entryId: string,
+  userId: string,
+  role: Role
+) {
+  return db.timeEntry.findFirst({
+    where: {
+      id: entryId,
+      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+    },
+    include: TIME_ENTRY_INCLUDE,
+  })
+}
+
+export async function listTimeEntriesForUser(
+  userId: string,
+  role: Role,
+  filters?: {
+    clientId?:    string
+    projectId?:   string
+    phaseId?:     string
+    categoryId?:  string
+    status?:      string
+    isBillable?:  boolean
+    timesheetId?: string | null  // null = unsubmitted entries
+    dateFrom?:    string
+    dateTo?:      string
+  }
+) {
+  return db.timeEntry.findMany({
+    where: {
+      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+      ...(filters?.clientId   ? { clientId:   filters.clientId }   : {}),
+      ...(filters?.projectId  ? { projectId:  filters.projectId }  : {}),
+      ...(filters?.phaseId    ? { phaseId:    filters.phaseId }    : {}),
+      ...(filters?.categoryId ? { categoryId: filters.categoryId } : {}),
+      ...(filters?.status     ? { status: filters.status as TimeEntryStatus } : {}),
+      ...(filters?.isBillable !== undefined ? { isBillable: filters.isBillable } : {}),
+      // null means "unsubmitted" — timesheetId IS NULL
+      ...(filters?.timesheetId !== undefined
+        ? { timesheetId: filters.timesheetId }
+        : {}),
+      ...(filters?.dateFrom || filters?.dateTo
+        ? {
+            date: {
+              ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+              ...(filters.dateTo   ? { lte: new Date(filters.dateTo) }   : {}),
+            },
+          }
+        : {}),
+    },
+    include: TIME_ENTRY_INCLUDE,
+    orderBy: { date: "desc" },
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Timesheet authorisation
 // ---------------------------------------------------------------------------
 
-/**
- * Return a timesheet only if the caller owns it (or is ADMIN).
- */
+const TIMESHEET_INCLUDE = {
+  client: {
+    select: {
+      id: true, name: true, reference: true, defaultRate: true,
+      approvalType: true, approvalGranularity: true,
+    },
+  },
+  entries: {
+    include: {
+      project:  { select: { id: true, name: true, rateOverride: true, billingType: true } },
+      phase:    { select: { id: true, name: true } },
+      category: { select: { id: true, name: true, colour: true } },
+    },
+  },
+} as const
+
 export async function getTimesheetForUser(
   timesheetId: string,
   userId: string,
@@ -55,19 +128,10 @@ export async function getTimesheetForUser(
       id: timesheetId,
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
     },
-    include: {
-      entries: {
-        include: { project: { select: { id: true, name: true, rateOverride: true } } },
-      },
-      client: { select: { id: true, name: true, defaultRate: true } },
-    },
+    include: TIMESHEET_INCLUDE,
   })
 }
 
-/**
- * List timesheets scoped to the calling user and optionally filtered by client / status / project.
- * Callers must supply their own userId — never trust the request body for this.
- */
 export async function listTimesheetsForUser(
   userId: string,
   role: Role,
@@ -77,16 +141,22 @@ export async function listTimesheetsForUser(
     where: {
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
       ...(filters?.clientId ? { clientId: filters.clientId } : {}),
-      ...(filters?.status ? { status: filters.status as TimesheetStatus } : {}),
-      ...(filters?.projectId ? { entries: { some: { projectId: filters.projectId } } } : {}),
+      ...(filters?.status   ? { status: filters.status as TimesheetStatus } : {}),
+      ...(filters?.projectId
+        ? { entries: { some: { projectId: filters.projectId } } }
+        : {}),
     },
     include: {
       client: { select: { id: true, name: true, reference: true, defaultRate: true } },
       entries: {
-        include: { project: { select: { id: true, name: true, rateOverride: true } } },
+        include: {
+          project:  { select: { id: true, name: true, rateOverride: true } },
+          phase:    { select: { id: true, name: true } },
+          category: { select: { id: true, name: true, colour: true } },
+        },
       },
     },
-    orderBy: { weekStart: "desc" },
+    orderBy: { periodStart: "desc" },
   })
 }
 
@@ -129,8 +199,8 @@ export async function listProjectsForUser(
   return db.project.findMany({
     where: {
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
-      ...(filters?.clientId ? { clientId: filters.clientId } : {}),
-      ...(filters?.active !== undefined ? { active: filters.active } : {}),
+      ...(filters?.clientId !== undefined ? { clientId: filters.clientId } : {}),
+      ...(filters?.active   !== undefined ? { active:   filters.active }   : {}),
     },
     include: { client: { select: { id: true, name: true } } },
     orderBy: { createdAt: "desc" },
@@ -160,7 +230,7 @@ export async function listExpensesForUser(
     where: {
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
       ...(filters?.clientId ? { clientId: filters.clientId } : {}),
-      ...(filters?.status ? { status: filters.status as never } : {}),
+      ...(filters?.status   ? { status: filters.status as never } : {}),
     },
     include: { client: { select: { id: true, name: true } } },
     orderBy: { date: "desc" },

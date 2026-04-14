@@ -118,7 +118,7 @@ export default async function DashboardPage() {
               {recentTimesheets.map((ts) => (
                 <tr key={ts.id}>
                   <td className="font-medium text-gray-900">{ts.client.name}</td>
-                  <td>{new Date(ts.weekStart).toLocaleDateString("en-GB")}</td>
+                  <td>{new Date(ts.periodStart).toLocaleDateString("en-GB")}</td>
                   <td>
                     <span className={`badge ${statusClass[ts.status] ?? "badge-draft"}`}>
                       {ts.status}

@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 
 interface Timesheet {
   id: string
-  weekStart: string
+  periodStart: string
+  periodEnd: string
   status: string
   submittedAt: string | null
   approvedAt: string | null
@@ -117,7 +118,7 @@ export default function ApprovalsPage() {
                 <tr key={ts.id}>
                   <td className="font-medium text-gray-900">{ts.client.name}</td>
                   <td className="text-gray-500 font-mono text-xs">{ts.client.reference ?? "—"}</td>
-                  <td>{new Date(ts.weekStart).toLocaleDateString("en-GB")}</td>
+                  <td>{new Date(ts.periodStart).toLocaleDateString("en-GB")}</td>
                   <td className="text-gray-400">
                     {ts.submittedAt ? new Date(ts.submittedAt).toLocaleDateString("en-GB") : "—"}
                   </td>

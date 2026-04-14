@@ -24,6 +24,30 @@ enum TimesheetStatus {
   INVOICED
 }
 
+enum TimeEntryStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum TimesheetGranularity {
+  WEEKLY
+  MONTHLY
+}
+
+enum BillingType {
+  TM
+  DRAWDOWN
+  FIXED
+}
+
+enum PhaseStatus {
+  ACTIVE
+  COMPLETE
+  ON_HOLD
+}
+
 enum InvoiceStatus {
   DRAFT
   SENT
@@ -49,6 +73,9 @@ enum AuditAction {
   MFA_FAILED
   MFA_RECOVERY_USED
   PASSWORD_CHANGED
+  TIME_ENTRY_CREATED
+  TIME_ENTRY_UPDATED
+  TIME_ENTRY_DELETED
   TIMESHEET_CREATED
   TIMESHEET_UPDATED
   TIMESHEET_SUBMITTED
@@ -93,12 +120,16 @@ model User {
   mfaVerifiedAt DateTime? // Timestamp of first successful TOTP verification
   recoveryCodes String[]  // argon2id-hashed single-use recovery codes
 
+  // Internal cost rate (never exposed to clients / invoices)
+  costRate      Decimal?  @db.Decimal(10, 2)
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
   // Relations
   clients        Client[]
   timesheets     Timesheet[]
+  timeEntries    TimeEntry[]
   projects       Project[]
   expenses       Expense[]
   auditLogs      AuditLog[]
@@ -142,10 +173,11 @@ model Client {
   // Soft-delete / archive
   isArchived          Boolean  @default(false)
 
-  timesheets Timesheet[]
-  projects   Project[]
-  expenses   Expense[]
-  invoices   Invoice[]
+  timesheets  Timesheet[]
+  timeEntries TimeEntry[]
+  projects    Project[]
+  expenses    Expense[]
+  invoices    Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -154,17 +186,25 @@ model Client {
 }
 
 model Project {
-  id           String   @id @default(cuid())
-  name         String
-  description  String?
-  clientId     String
-  client       Client   @relation(fields: [clientId], references: [id])
-  managerId    String
-  manager      User     @relation(fields: [managerId], references: [id])
-  active       Boolean  @default(true)
-  rateOverride Decimal? @db.Decimal(10, 2)  // Overrides client defaultRate when set
+  id               String      @id @default(cuid())
+  name             String
+  description      String?
+  clientId         String
+  client           Client      @relation(fields: [clientId], references: [id])
+  managerId        String
+  manager          User        @relation(fields: [managerId], references: [id])
+  active           Boolean     @default(true)
+  rateOverride     Decimal?    @db.Decimal(10, 2)  // Overrides client defaultRate when set
 
-  timesheetEntries TimesheetEntry[]
+  // Billing type and budget fields
+  billingType      BillingType @default(TM)
+  budgetHours      Decimal?    @db.Decimal(10, 2)
+  contingencyHours Decimal?    @db.Decimal(10, 2)
+  budgetValue      Decimal?    @db.Decimal(10, 2)
+  drawdownRate     Decimal?    @db.Decimal(10, 2)
+
+  phases      ProjectPhase[]
+  timeEntries TimeEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -173,15 +213,52 @@ model Project {
   @@index([clientId])
 }
 
+model ProjectPhase {
+  id               String      @id @default(cuid())
+  projectId        String
+  project          Project     @relation(fields: [projectId], references: [id])
+  name             String
+  description      String?
+  billingType      BillingType @default(TM)
+  budgetHours      Decimal?    @db.Decimal(10, 2)
+  contingencyHours Decimal?    @db.Decimal(10, 2)
+  budgetValue      Decimal?    @db.Decimal(10, 2)
+  startDate        DateTime?   @db.Date
+  endDate          DateTime?   @db.Date
+  status           PhaseStatus @default(ACTIVE)
+
+  timeEntries TimeEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}
+
+model TimeCategory {
+  id         String      @id @default(cuid())
+  name       String
+  colour     String      @default("#6366f1")  // hex colour for UI display
+  isBillable Boolean     @default(true)
+  sortOrder  Int         @default(0)
+
+  timeEntries TimeEntry[]
+
+  createdAt DateTime @default(now())
+}
+
 model Timesheet {
-  id          String          @id @default(cuid())
-  clientId    String
-  client      Client          @relation(fields: [clientId], references: [id])
-  managerId   String
-  manager     User            @relation(fields: [managerId], references: [id])
-  weekStart   DateTime        @db.Date
-  entries     TimesheetEntry[]
-  status      TimesheetStatus @default(DRAFT)
+  id           String               @id @default(cuid())
+  clientId     String
+  client       Client               @relation(fields: [clientId], references: [id])
+  managerId    String
+  manager      User                 @relation(fields: [managerId], references: [id])
+  periodStart  DateTime             @db.Date
+  periodEnd    DateTime             @db.Date
+  granularity  TimesheetGranularity @default(WEEKLY)
+  entries      TimeEntry[]
+  status       TimesheetStatus      @default(DRAFT)
+  rejectionNote String?
 
   submittedAt DateTime?
   approvedAt  DateTime?
@@ -199,22 +276,37 @@ model Timesheet {
   @@index([status])
 }
 
-model TimesheetEntry {
-  id          String    @id @default(cuid())
-  timesheetId String
-  timesheet   Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+// TimeEntry: a single unit of work — exists independently until bundled into a Timesheet
+model TimeEntry {
+  id          String          @id @default(cuid())
+  date        DateTime        @db.Date
+  clientId    String?
+  client      Client?         @relation(fields: [clientId], references: [id])
   projectId   String?
-  project     Project?  @relation(fields: [projectId], references: [id])
-  date        DateTime  @db.Date
-  hours       Decimal   @db.Decimal(5, 2)
+  project     Project?        @relation(fields: [projectId], references: [id])
+  phaseId     String?
+  phase       ProjectPhase?   @relation(fields: [phaseId], references: [id])
+  categoryId  String?
+  category    TimeCategory?   @relation(fields: [categoryId], references: [id])
+  managerId   String?
+  manager     User?           @relation(fields: [managerId], references: [id])
+  timesheetId String?
+  timesheet   Timesheet?      @relation(fields: [timesheetId], references: [id], onDelete: SetNull)
+  hours       Decimal         @db.Decimal(5, 2)
   description String
-  receiptPath String?   // server-side path (never expose to client directly)
+  isBillable  Boolean         @default(true)
+  status      TimeEntryStatus @default(DRAFT)
+  invoiced    Boolean         @default(false)
+  receiptPath String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@index([timesheetId])
+  @@index([managerId])
+  @@index([clientId])
   @@index([projectId])
+  @@index([timesheetId])
+  @@index([date])
 }
 
 model Expense {
