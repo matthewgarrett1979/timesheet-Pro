@@ -163,7 +163,29 @@ export async function listExpensesForUser(
 export async function listInvoicesForUser(userId: string, role: Role) {
   return db.invoice.findMany({
     where: role !== Role.ADMIN ? { managerId: userId } : {},
-    include: { client: { select: { id: true, name: true } } },
+    include: {
+      client: {
+        select: {
+          id: true,
+          name: true,
+          companyName: true,
+          tradingName: true,
+          addressLine1: true,
+          addressLine2: true,
+          city: true,
+          county: true,
+          postcode: true,
+          country: true,
+          vatNumber: true,
+          contactName: true,
+          contactEmail: true,
+          contactPhone: true,
+          purchaseOrderNumber: true,
+          invoicePaymentTerms: true,
+          invoiceCurrency: true,
+        },
+      },
+    },
     orderBy: { createdAt: "desc" },
   })
 }

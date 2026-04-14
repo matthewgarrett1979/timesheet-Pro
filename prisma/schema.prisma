@@ -109,10 +109,32 @@ model User {
 
 model Client {
   id        String   @id @default(cuid())
-  name      String
+  name      String   // Internal display name
   reference String?  // e.g. "GD-2024-001"
   managerId String
   manager   User     @relation(fields: [managerId], references: [id])
+
+  // UK B2B invoice billing details
+  companyName         String?  // Legal entity name for invoice header
+  tradingName         String?  // Trading name if different from legal name
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  county              String?
+  postcode            String?
+  country             String   @default("United Kingdom")
+  vatNumber           String?  // VAT registration number (e.g. GB123456789)
+  contactName         String?  // Primary billing contact
+  contactEmail        String?
+  contactPhone        String?
+  purchaseOrderNumber String?  // Many defence clients require a PO on invoices
+  invoicePaymentTerms Int?     // Days — overrides company default if set
+  invoiceCurrency     String   @default("GBP")
+  notes               String?  // Internal only — never shown on invoice
+
+  // Approval workflow
+  approvalType        String   @default("EMAIL")     // EMAIL | PORTAL | NONE
+  approvalGranularity String   @default("TIMESHEET") // TIMESHEET | MONTHLY | QUARTERLY
 
   timesheets Timesheet[]
   projects   Project[]
@@ -240,6 +262,18 @@ model Invoice {
 
   @@index([managerId])
   @@index([clientId])
+}
+
+// Global appearance / theme settings — singleton row with id = 'global'
+model AppSettings {
+  id              String   @id @default("global")
+  primaryColor    String   @default("#1e293b")   // sidebar / nav background
+  accentColor     String   @default("#2563eb")   // active items, buttons
+  backgroundColor String   @default("#f9fafb")   // page background
+  fontFamily      String   @default("inter")     // inter | system | georgia | mono
+  navStyle        String   @default("sidebar")   // sidebar | topbar
+  compactMode     Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
 }
 
 // Immutable audit log — rows are never updated or deleted by the application
