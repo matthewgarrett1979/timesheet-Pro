@@ -4,6 +4,7 @@ import "./globals.css"
 import Providers from "@/components/Providers"
 import { db } from "@/lib/db"
 import type React from "react"
+export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: "Tech Timesheet",
