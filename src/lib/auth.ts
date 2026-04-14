@@ -36,109 +36,132 @@ export const authOptions: NextAuthOptions = {
       },
 
       async authorize(credentials, req) {
-        if (!credentials?.email || !credentials?.password) {
-          return null
-        }
+        try {
+          if (!credentials?.email || !credentials?.password) {
+            return null
+          }
 
-        const ip =
-          (req.headers?.["x-forwarded-for"] as string | undefined)
-            ?.split(",")[0]
-            .trim() ?? "unknown"
-        const ua = (req.headers?.["user-agent"] as string | undefined) ?? "unknown"
-        const email = credentials.email.toLowerCase().trim()
+          const ip =
+            (req.headers?.["x-forwarded-for"] as string | undefined)
+              ?.split(",")[0]
+              .trim() ?? "unknown"
+          const ua = (req.headers?.["user-agent"] as string | undefined) ?? "unknown"
+          const email = credentials.email.toLowerCase().trim()
 
-        const user = await db.user.findUnique({ where: { email } })
+          const user = await db.user.findUnique({ where: { email } })
 
-        if (!user) {
-          // Constant-time path: don't reveal that the account doesn't exist
-          await audit({
-            action: AuditAction.USER_LOGIN_FAILED,
-            resource: "auth",
-            metadata: { reason: "user_not_found" },
-            ipAddress: ip,
-            userAgent: ua,
-            success: false,
-          })
-          return null
-        }
+          if (!user) {
+            // Constant-time path: don't reveal that the account doesn't exist
+            try {
+              await audit({
+                action: AuditAction.USER_LOGIN_FAILED,
+                resource: "auth",
+                metadata: { reason: "user_not_found" },
+                ipAddress: ip,
+                userAgent: ua,
+                success: false,
+              })
+            } catch (auditErr) {
+              console.error("[auth] audit failed (user_not_found):", auditErr)
+            }
+            return null
+          }
 
-        // Check lockout
-        if (user.lockedUntil && user.lockedUntil > new Date()) {
-          await audit({
-            userId: user.id,
-            action: AuditAction.USER_LOGIN_FAILED,
-            resource: "auth",
-            resourceId: user.id,
-            metadata: {
-              reason: "account_locked",
-              lockedUntil: user.lockedUntil,
-            },
-            ipAddress: ip,
-            userAgent: ua,
-            success: false,
-          })
-          throw new Error("AccountLocked")
-        }
+          // Check lockout
+          if (user.lockedUntil && user.lockedUntil > new Date()) {
+            try {
+              await audit({
+                userId: user.id,
+                action: AuditAction.USER_LOGIN_FAILED,
+                resource: "auth",
+                resourceId: user.id,
+                metadata: {
+                  reason: "account_locked",
+                  lockedUntil: user.lockedUntil,
+                },
+                ipAddress: ip,
+                userAgent: ua,
+                success: false,
+              })
+            } catch (auditErr) {
+              console.error("[auth] audit failed (account_locked):", auditErr)
+            }
+            throw new Error("AccountLocked")
+          }
 
-        const valid = await verifyPassword(credentials.password, user.passwordHash)
+          const valid = await verifyPassword(credentials.password, user.passwordHash)
 
-        if (!valid) {
-          const newCount = user.failedLogins + 1
-          const lock = newCount >= MAX_FAILED_ATTEMPTS
+          if (!valid) {
+            const newCount = user.failedLogins + 1
+            const lock = newCount >= MAX_FAILED_ATTEMPTS
 
+            await db.user.update({
+              where: { id: user.id },
+              data: {
+                failedLogins: newCount,
+                lockedUntil: lock
+                  ? new Date(Date.now() + LOCKOUT_MS)
+                  : undefined,
+              },
+            })
+
+            try {
+              await audit({
+                userId: user.id,
+                action: lock ? AuditAction.USER_LOCKED : AuditAction.USER_LOGIN_FAILED,
+                resource: "auth",
+                resourceId: user.id,
+                metadata: {
+                  reason: "invalid_password",
+                  failedAttempts: newCount,
+                  locked: lock,
+                },
+                ipAddress: ip,
+                userAgent: ua,
+                success: false,
+              })
+            } catch (auditErr) {
+              console.error("[auth] audit failed (invalid_password):", auditErr)
+            }
+
+            return null
+          }
+
+          // Success — reset counters
           await db.user.update({
             where: { id: user.id },
-            data: {
-              failedLogins: newCount,
-              lockedUntil: lock
-                ? new Date(Date.now() + LOCKOUT_MS)
-                : undefined,
-            },
+            data: { failedLogins: 0, lockedUntil: null },
           })
 
-          await audit({
-            userId: user.id,
-            action: lock ? AuditAction.USER_LOCKED : AuditAction.USER_LOGIN_FAILED,
-            resource: "auth",
-            resourceId: user.id,
-            metadata: {
-              reason: "invalid_password",
-              failedAttempts: newCount,
-              locked: lock,
-            },
-            ipAddress: ip,
-            userAgent: ua,
-            success: false,
-          })
+          try {
+            await audit({
+              userId: user.id,
+              action: AuditAction.USER_LOGIN,
+              resource: "auth",
+              resourceId: user.id,
+              metadata: { mfaRequired: user.mfaEnabled },
+              ipAddress: ip,
+              userAgent: ua,
+              success: true,
+            })
+          } catch (auditErr) {
+            console.error("[auth] audit failed (login_success):", auditErr)
+          }
 
+          // Return the fields we need in the JWT. NextAuth merges these into
+          // the User object received by the jwt() callback as `user`.
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            mfaEnabled: user.mfaEnabled,
+          }
+        } catch (err) {
+          // Re-throw AccountLocked so NextAuth surfaces it to the client
+          if (err instanceof Error && err.message === "AccountLocked") throw err
+          console.error("[auth] authorize error:", err)
           return null
-        }
-
-        // Success — reset counters
-        await db.user.update({
-          where: { id: user.id },
-          data: { failedLogins: 0, lockedUntil: null },
-        })
-
-        await audit({
-          userId: user.id,
-          action: AuditAction.USER_LOGIN,
-          resource: "auth",
-          resourceId: user.id,
-          metadata: { mfaRequired: user.mfaEnabled },
-          ipAddress: ip,
-          userAgent: ua,
-          success: true,
-        })
-
-        // Return the fields we need in the JWT. NextAuth merges these into
-        // the User object received by the jwt() callback as `user`.
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          mfaEnabled: user.mfaEnabled,
         }
       },
     }),
@@ -204,13 +227,17 @@ export const authOptions: NextAuthOptions = {
           ? (message.token as { id?: string })?.id
           : undefined
       if (userId) {
-        await audit({
-          userId,
-          action: AuditAction.USER_LOGOUT,
-          resource: "auth",
-          resourceId: userId,
-          success: true,
-        })
+        try {
+          await audit({
+            userId,
+            action: AuditAction.USER_LOGOUT,
+            resource: "auth",
+            resourceId: userId,
+            success: true,
+          })
+        } catch (auditErr) {
+          console.error("[auth] audit failed (logout):", auditErr)
+        }
       }
     },
   },
