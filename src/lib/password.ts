@@ -9,12 +9,16 @@
  */
 import argon2 from "argon2"
 
-const ARGON2_OPTIONS: argon2.Options = {
+// No explicit `argon2.Options` annotation — that widens `raw` to
+// `boolean | undefined`, making TypeScript unable to resolve the overload.
+// Letting TS infer the narrower literal type (no `raw` key) selects the
+// string-returning overload of argon2.hash() correctly.
+const ARGON2_OPTIONS = {
   type: argon2.argon2id,
   memoryCost: 65536, // 64 MiB
   timeCost: 3,       // 3 iterations
   parallelism: 4,
-}
+} satisfies argon2.Options
 
 /**
  * Hash a plaintext password. Store the result — never the plaintext.
