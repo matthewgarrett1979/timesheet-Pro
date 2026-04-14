@@ -10,9 +10,10 @@ const nextConfig: NextConfig = {
   // Compress responses
   compress: true,
 
-  // Images: restrict to known domains only
+  // Images: no remote patterns needed (receipts are served locally)
+  // domains[] is deprecated in Next.js 15 — use remotePatterns instead
   images: {
-    domains: [],
+    remotePatterns: [],
     dangerouslyAllowSVG: false,
   },
 
