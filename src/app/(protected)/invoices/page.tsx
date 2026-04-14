@@ -32,7 +32,8 @@ interface TimesheetEntry {
 
 interface Timesheet {
   id: string
-  weekStart: string
+  periodStart: string
+  periodEnd: string
   status: string
   client: { id: string; name: string; defaultRate: string | null }
   entries: TimesheetEntry[]
@@ -349,7 +350,7 @@ function CreateInvoiceModal({
                         checked={selectedIds.includes(ts.id)}
                         onChange={() => toggleTs(ts.id)}
                       />
-                      <span>Week of {new Date(ts.weekStart).toLocaleDateString("en-GB")}</span>
+                      <span>Period: {new Date(ts.periodStart).toLocaleDateString("en-GB")}</span>
                       {projectNames.length > 0 && (
                         <span className="text-xs text-gray-400">({projectNames.join(", ")})</span>
                       )}

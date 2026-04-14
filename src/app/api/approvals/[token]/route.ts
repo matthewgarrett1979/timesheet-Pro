@@ -25,6 +25,7 @@ import { z } from "zod"
 
 const bodySchema = z.object({
   approverEmail: z.string().email("A valid approver email is required"),
+  action:  z.enum(["approve", "reject"]).default("approve"),
   comment: z.string().trim().max(1000).optional(),
 })
 
@@ -105,6 +106,32 @@ export async function POST(
       { error: `Timesheet is not awaiting approval (status: ${timesheet.status})` },
       { status: 409 }
     )
+  }
+
+  if (body.action === "reject") {
+    // Request changes — reject the timesheet
+    await db.timesheet.update({
+      where: { id: verified.timesheetId },
+      data: {
+        status: TimesheetStatus.REJECTED,
+        rejectionNote: body.comment ?? "Changes requested by client.",
+      },
+    })
+    await audit({
+      action: AuditAction.TIMESHEET_REJECTED,
+      resource: "timesheet",
+      resourceId: verified.timesheetId,
+      metadata: { approverEmail: body.approverEmail, clientId: verified.clientId, comment: body.comment },
+      ipAddress: ip,
+      userAgent: ua,
+      success: true,
+    })
+    return NextResponse.json({
+      ok: true,
+      timesheetId: verified.timesheetId,
+      status: TimesheetStatus.REJECTED,
+      message: "Changes requested. The timesheet owner has been notified.",
+    })
   }
 
   // Approve

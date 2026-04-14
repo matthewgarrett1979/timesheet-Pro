@@ -1,173 +1,249 @@
 "use client"
 
-import { useEffect, useState, Suspense } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
-import Link from "next/link"
+import { useEffect, useState } from "react"
+import { useSession } from "next-auth/react"
 
-interface Client {
-  id: string
-  name: string
-  reference: string | null
-}
-
-interface ProjectOption {
-  id: string
-  name: string
-  clientId: string
-  active: boolean
-  rateOverride: string | null
-  client: { id: string; name: string }
-}
-
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 interface TimesheetEntry {
-  id: string
-  date: string
-  hours: number | string
-  description: string
-  projectId: string | null
+  id: string; date: string; hours: string | number; description: string
+  isBillable: boolean; status: string; timesheetId: string | null
   project: { id: string; name: string; rateOverride: string | null } | null
+  phase: { id: string; name: string } | null
+  category: { id: string; name: string; colour: string } | null
 }
-
 interface Timesheet {
-  id: string
-  weekStart: string
-  status: string
-  submittedAt: string | null
-  approvedAt: string | null
-  approvedBy: string | null
-  client: { id: string; name: string; reference: string | null; defaultRate: string | null }
+  id: string; periodStart: string; periodEnd: string; granularity: string; status: string
+  rejectionNote: string | null; submittedAt: string | null; approvedAt: string | null; approvedBy: string | null
+  client: { id: string; name: string; reference: string | null; defaultRate: string | null; invoiceCurrency: string }
   entries: TimesheetEntry[]
 }
+interface Client { id: string; name: string }
 
-const STATUS_OPTIONS = ["", "DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "INVOICED"]
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+const fmt = (d: string | Date) => new Date(d).toLocaleDateString("en-GB")
+const STATUS_LIST = ["", "DRAFT", "SUBMITTED", "APPROVED", "PARTIALLY_APPROVED", "REJECTED", "INVOICED"]
 
-const statusClass: Record<string, string> = {
-  DRAFT: "badge-draft",
-  SUBMITTED: "badge-submitted",
-  APPROVED: "badge-approved",
-  REJECTED: "badge-rejected",
-  INVOICED: "badge-invoiced",
+function statusClass(s: string) {
+  return s === "DRAFT" ? "badge-draft" : s === "SUBMITTED" ? "badge-submitted" : s === "APPROVED" ? "badge-approved" : s === "REJECTED" ? "badge-rejected" : s === "INVOICED" ? "badge-invoiced" : s === "PARTIALLY_APPROVED" ? "bg-amber-100 text-amber-800 border border-amber-200" : "badge-draft"
 }
 
-function buildUrl(params: { status?: string; project?: string }) {
-  const p = new URLSearchParams()
-  if (params.status) p.set("status", params.status)
-  if (params.project) p.set("project", params.project)
-  return p.size > 0 ? `/timesheets?${p}` : "/timesheets"
+function calcTotals(entries: TimesheetEntry[], rate: number) {
+  const total    = entries.reduce((s, e) => s + Number(e.hours), 0)
+  const billable = entries.filter(e => e.isBillable).reduce((s, e) => s + Number(e.hours), 0)
+  const value    = billable * rate
+  return { total, billable, nonBillable: total - billable, value }
 }
 
-function TimesheetsContent() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
-  const statusFilter = searchParams.get("status") ?? ""
-  const projectFilter = searchParams.get("project") ?? ""
+function downloadTimesheetCsv(ts: Timesheet) {
+  const rate = Number(ts.client.defaultRate ?? 0)
+  const rows = [["Date","Project","Phase","Category","Hours","Billable","Description","Status","Rate","Value"]]
+  for (const e of ts.entries) {
+    const r = Number(e.project?.rateOverride ?? rate)
+    const v = e.isBillable ? Number(e.hours) * r : 0
+    rows.push([
+      fmt(e.date), e.project?.name ?? "", e.phase?.name ?? "", e.category?.name ?? "",
+      Number(e.hours).toFixed(2), e.isBillable ? "Yes" : "No",
+      `"${(e.description ?? "").replace(/"/g, '""')}"`, e.status,
+      r.toFixed(2), v.toFixed(2),
+    ])
+  }
+  const csv = rows.map(r => r.join(",")).join("\n")
+  const blob = new Blob([csv], { type: "text/csv" })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement("a"); a.href = url; a.download = `timesheet-${ts.id.slice(-8)}.csv`; a.click()
+  URL.revokeObjectURL(url)
+}
+
+// Group entries by project → phase
+function groupEntries(entries: TimesheetEntry[]) {
+  const map: Record<string, { project: string | null; phases: Record<string, { phase: string | null; entries: TimesheetEntry[] }> }> = {}
+  for (const e of entries) {
+    const pk = e.project?.id ?? "_none"
+    const pn = e.project?.name ?? "No project"
+    const phk = e.phase?.id ?? "_none"
+    const phn = e.phase?.name ?? null
+    if (!map[pk]) map[pk] = { project: pn, phases: {} }
+    if (!map[pk].phases[phk]) map[pk].phases[phk] = { phase: phn, entries: [] }
+    map[pk].phases[phk].entries.push(e)
+  }
+  return Object.values(map)
+}
+
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
+export default function TimesheetsPage() {
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === "ADMIN"
 
   const [timesheets, setTimesheets] = useState<Timesheet[]>([])
-  const [clients, setClients] = useState<Client[]>([])
-  const [projects, setProjects] = useState<ProjectOption[]>([])
-  const [loading, setLoading] = useState(true)
-  const [showCreate, setShowCreate] = useState(false)
-  const [submitting, setSubmitting] = useState<string | null>(null)
-  const [approvalToken, setApprovalToken] = useState<{ tsId: string; token: string } | null>(null)
+  const [clients,    setClients]    = useState<Client[]>([])
+  const [loading,    setLoading]    = useState(true)
 
-  async function load() {
+  // Filters
+  const [filterClient, setFilterClient] = useState("")
+  const [filterStatus, setFilterStatus] = useState("")
+
+  // Detail modal
+  const [detail, setDetail] = useState<Timesheet | null>(null)
+  const [submitting, setSubmitting] = useState<string | null>(null)
+  const [actionMsg,  setActionMsg]  = useState("")
+
+  // Approve/reject in detail
+  const [approveOpen,   setApproveOpen]  = useState(false)
+  const [rejectNote,    setRejectNote]   = useState("")
+  const [forceAction,   setForceAction]  = useState<string | null>(null)
+  const [forceReason,   setForceReason]  = useState("")
+  const [partialSel,    setPartialSel]   = useState<Set<string>>(new Set())
+  const [partialReject, setPartialReject] = useState<Set<string>>(new Set())
+
+  const load = async () => {
+    setLoading(true)
     const params = new URLSearchParams()
-    if (statusFilter) params.set("status", statusFilter)
-    if (projectFilter) params.set("projectId", projectFilter)
-    const qs = params.size > 0 ? `?${params}` : ""
-    const [ts, cl, pr] = await Promise.all([
-      fetch(`/api/timesheets${qs}`).then((r) => r.json()),
-      fetch("/api/clients").then((r) => r.json()),
-      fetch("/api/projects").then((r) => r.json()),
+    if (filterClient) params.set("clientId", filterClient)
+    if (filterStatus) params.set("status",   filterStatus)
+    const [ts] = await Promise.all([
+      fetch(`/api/timesheets?${params}`).then(r => r.json()),
     ])
     setTimesheets(Array.isArray(ts) ? ts : [])
-    setClients(Array.isArray(cl) ? cl : [])
-    setProjects(Array.isArray(pr) ? pr : [])
     setLoading(false)
   }
 
-  useEffect(() => { setLoading(true); load() }, [statusFilter, projectFilter])
+  useEffect(() => {
+    fetch("/api/clients").then(r => r.json()).then(setClients)
+  }, [])
+  useEffect(() => { load() }, [filterClient, filterStatus])
 
   async function submitTimesheet(id: string) {
     setSubmitting(id)
     const res = await fetch(`/api/timesheets/${id}/submit`, { method: "POST" })
-    setSubmitting(null)
+    const data = await res.json()
     if (res.ok) {
-      const data = await res.json()
-      setApprovalToken({ tsId: id, token: data.approvalToken })
-      load()
+      setActionMsg(`Submitted. Status: ${data.status}`)
+      await load()
+    } else {
+      setActionMsg(data.error ?? "Failed")
     }
+    setSubmitting(null)
+    setTimeout(() => setActionMsg(""), 4000)
   }
 
+  async function doApprove(id: string) {
+    setSubmitting(id)
+    const res = await fetch(`/api/timesheets/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "APPROVE" }),
+    })
+    const data = await res.json()
+    setActionMsg(res.ok ? "Approved!" : (data.error ?? "Failed"))
+    await load()
+    if (detail?.id === id) setDetail(null)
+    setSubmitting(null)
+    setApproveOpen(false)
+    setTimeout(() => setActionMsg(""), 3000)
+  }
+
+  async function doReject(id: string) {
+    if (!rejectNote.trim()) return
+    setSubmitting(id)
+    const res = await fetch(`/api/timesheets/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "REJECT", rejectionNote: rejectNote }),
+    })
+    const data = await res.json()
+    setActionMsg(res.ok ? "Rejected." : (data.error ?? "Failed"))
+    await load()
+    if (detail?.id === id) setDetail(null)
+    setSubmitting(null)
+    setRejectNote("")
+    setTimeout(() => setActionMsg(""), 3000)
+  }
+
+  async function doPartialApprove(id: string) {
+    const approvedEntryIds = Array.from(partialSel)
+    const rejectedEntryIds = Array.from(partialReject)
+    if (!approvedEntryIds.length || !rejectedEntryIds.length) return
+    setSubmitting(id)
+    const res = await fetch(`/api/timesheets/${id}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "PARTIAL", approvedEntryIds, rejectedEntryIds }),
+    })
+    const data = await res.json()
+    setActionMsg(res.ok ? "Partial approval saved." : (data.error ?? "Failed"))
+    await load()
+    if (detail?.id === id) setDetail(null)
+    setSubmitting(null)
+    setPartialSel(new Set()); setPartialReject(new Set())
+    setTimeout(() => setActionMsg(""), 3000)
+  }
+
+  async function doForce(id: string) {
+    if (!forceReason.trim()) return
+    setSubmitting(id)
+    const res = await fetch(`/api/timesheets/${id}/force`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: forceAction, reason: forceReason }),
+    })
+    const data = await res.json()
+    setActionMsg(res.ok ? "Done." : (data.error ?? "Failed"))
+    await load()
+    if (detail?.id === id) setDetail(null)
+    setSubmitting(null)
+    setForceAction(null); setForceReason("")
+    setTimeout(() => setActionMsg(""), 3000)
+  }
+
+  async function doResendEmail(id: string) {
+    setSubmitting(id)
+    await fetch(`/api/timesheets/${id}/resend-approval`, { method: "POST" })
+    setActionMsg("Approval email resent.")
+    setSubmitting(null)
+    setTimeout(() => setActionMsg(""), 3000)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
   return (
     <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Timesheets</h1>
+        <p className="text-sm text-gray-500 mt-1">Submitted timesheet bundles</p>
+      </div>
+
+      {actionMsg && (
+        <div className="mb-4 card p-3 bg-blue-50 border-blue-200 text-sm text-blue-800">{actionMsg}</div>
+      )}
+
+      {/* Filters */}
+      <div className="card p-3 mb-4 flex flex-wrap gap-3 items-end">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Timesheets</h1>
-          <p className="text-sm text-gray-500 mt-1">{timesheets.length} result{timesheets.length !== 1 ? "s" : ""}</p>
-        </div>
-        <button className="btn-primary" onClick={() => setShowCreate(true)}>
-          New timesheet
-        </button>
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex gap-2 mb-2 flex-wrap items-center">
-        {STATUS_OPTIONS.map((s) => (
-          <button
-            key={s}
-            onClick={() => router.push(buildUrl({ status: s || undefined, project: projectFilter || undefined }))}
-            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-              statusFilter === s
-                ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white text-gray-600 border-gray-300 hover:border-blue-400"
-            }`}
-          >
-            {s || "All"}
-          </button>
-        ))}
-      </div>
-
-      {projects.length > 0 && (
-        <div className="flex gap-2 mb-4 items-center">
-          <span className="text-xs text-gray-500">Project:</span>
-          <select
-            value={projectFilter}
-            onChange={(e) => router.push(buildUrl({ status: statusFilter || undefined, project: e.target.value || undefined }))}
-            className="px-3 py-1.5 rounded-full text-xs font-medium border border-gray-300 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          >
-            <option value="">All projects</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.client.name} / {p.name}
-              </option>
-            ))}
+          <label className="label">Client</label>
+          <select className="input text-sm py-1.5" value={filterClient} onChange={e => setFilterClient(e.target.value)}>
+            <option value="">All clients</option>
+            {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-      )}
-
-      {/* Approval token callout */}
-      {approvalToken && (
-        <div className="mb-4 card p-4 bg-green-50 border-green-200">
-          <p className="text-sm font-medium text-green-800 mb-2">Timesheet submitted. Copy this approval link to send to your client:</p>
-          <div className="flex gap-2 items-center">
-            <code className="flex-1 text-xs bg-white border border-green-200 rounded px-3 py-2 break-all">
-              {typeof window !== "undefined" ? window.location.origin : ""}/api/approvals/placeholder?token={approvalToken.token}
-            </code>
-            <button
-              onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/api/approvals/placeholder?token=${approvalToken.token}`); }}
-              className="btn-secondary text-xs shrink-0"
-            >
-              Copy
-            </button>
-          </div>
-          <p className="text-xs text-green-600 mt-2">
-            Note: send this token to your client. They POST to <code>/api/approvals/[token]</code> to approve.
-          </p>
-          <button onClick={() => setApprovalToken(null)} className="mt-2 text-xs text-green-700 hover:underline">Dismiss</button>
+        <div>
+          <label className="label">Status</label>
+          <select className="input text-sm py-1.5" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+            {STATUS_LIST.map(s => <option key={s} value={s}>{s || "All"}</option>)}
+          </select>
         </div>
-      )}
+        {(filterClient || filterStatus) && (
+          <button onClick={() => { setFilterClient(""); setFilterStatus("") }} className="btn-secondary btn text-sm py-1.5">Clear</button>
+        )}
+      </div>
 
+      {/* Table */}
       <div className="card overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
@@ -178,45 +254,35 @@ function TimesheetsContent() {
             <thead>
               <tr>
                 <th>Client</th>
-                <th>Week starting</th>
-                <th>Projects</th>
+                <th>Period</th>
+                <th>Granularity</th>
                 <th>Status</th>
+                <th>Hours</th>
+                <th>Billable</th>
                 <th>Submitted</th>
-                <th>Approved by</th>
-                <th></th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {timesheets.map((ts) => {
-                const entryProjects = Array.from(
-                  new Set(ts.entries.map((e) => e.project?.name).filter(Boolean))
-                ) as string[]
+              {timesheets.map(ts => {
+                const rate = Number(ts.client.defaultRate ?? 0)
+                const totals = calcTotals(ts.entries, rate)
                 return (
                   <tr key={ts.id}>
                     <td className="font-medium text-gray-900">{ts.client.name}</td>
-                    <td>{new Date(ts.weekStart).toLocaleDateString("en-GB")}</td>
-                    <td className="text-gray-500 text-xs">
-                      {entryProjects.length > 0 ? entryProjects.join(", ") : "—"}
-                    </td>
+                    <td className="text-sm">{fmt(ts.periodStart)} – {fmt(ts.periodEnd)}</td>
+                    <td><span className="text-xs bg-gray-100 text-gray-600 rounded px-1.5 py-0.5">{ts.granularity}</span></td>
+                    <td><span className={`badge ${statusClass(ts.status)}`}>{ts.status}</span></td>
+                    <td>{totals.total.toFixed(2)}h</td>
+                    <td>{totals.billable.toFixed(2)}h</td>
+                    <td className="text-gray-400 text-sm">{ts.submittedAt ? fmt(ts.submittedAt) : "—"}</td>
                     <td>
-                      <span className={`badge ${statusClass[ts.status] ?? "badge-draft"}`}>
-                        {ts.status}
-                      </span>
-                    </td>
-                    <td className="text-gray-400">
-                      {ts.submittedAt ? new Date(ts.submittedAt).toLocaleDateString("en-GB") : "—"}
-                    </td>
-                    <td className="text-gray-400 text-xs">{ts.approvedBy ?? "—"}</td>
-                    <td>
-                      {ts.status === "DRAFT" && (
-                        <button
-                          onClick={() => submitTimesheet(ts.id)}
-                          disabled={submitting === ts.id}
-                          className="text-sm text-blue-600 hover:underline disabled:opacity-50"
-                        >
-                          {submitting === ts.id ? "Submitting…" : "Submit"}
-                        </button>
-                      )}
+                      <div className="flex gap-1.5">
+                        <button onClick={() => { setDetail(ts); setPartialSel(new Set(ts.entries.filter(e => e.status === "SUBMITTED").map(e => e.id))); setPartialReject(new Set()) }} className="btn-secondary btn text-xs py-0.5">View</button>
+                        {ts.status === "DRAFT" && (
+                          <button onClick={() => submitTimesheet(ts.id)} disabled={submitting === ts.id} className="btn-primary btn text-xs py-0.5">{submitting === ts.id ? "…" : "Submit"}</button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -226,246 +292,146 @@ function TimesheetsContent() {
         )}
       </div>
 
-      {showCreate && (
-        <CreateTimesheetModal
-          clients={clients}
-          onClose={() => setShowCreate(false)}
-          onSaved={() => { setShowCreate(false); load() }}
-        />
-      )}
-    </div>
-  )
-}
-
-function getMondayOfCurrentWeek(): string {
-  const today = new Date()
-  const day = today.getDay() // 0 = Sun, 1 = Mon … 6 = Sat
-  const diff = day === 0 ? -6 : 1 - day
-  const monday = new Date(today)
-  monday.setDate(today.getDate() + diff)
-  return monday.toISOString().split("T")[0]
-}
-
-function CreateTimesheetModal({
-  clients,
-  onClose,
-  onSaved,
-}: {
-  clients: Client[]
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const [clientId, setClientId] = useState("")
-  const [weekStart, setWeekStart] = useState(() => getMondayOfCurrentWeek())
-  const [entries, setEntries] = useState([
-    { date: "", hours: "8", description: "", projectId: "" },
-  ])
-  const [clientProjects, setClientProjects] = useState<ProjectOption[]>([])
-  const [loadingProjects, setLoadingProjects] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState("")
-
-  // Fetch projects for the selected client whenever clientId changes
-  useEffect(() => {
-    if (!clientId) {
-      setClientProjects([])
-      return
-    }
-    setLoadingProjects(true)
-    fetch(`/api/projects?clientId=${clientId}&active=true`)
-      .then((r) => r.json())
-      .then((data) => {
-        setClientProjects(Array.isArray(data) ? data : [])
-        setLoadingProjects(false)
-      })
-      .catch(() => {
-        setClientProjects([])
-        setLoadingProjects(false)
-      })
-  }, [clientId])
-
-  function handleClientChange(id: string) {
-    setClientId(id)
-    setClientProjects([])
-    setEntries((prev) => prev.map((e) => ({ ...e, projectId: "" })))
-  }
-
-  function addEntry() {
-    if (entries.length < 7) setEntries([...entries, { date: "", hours: "8", description: "", projectId: "" }])
-  }
-
-  function removeEntry(i: number) {
-    setEntries(entries.filter((_, idx) => idx !== i))
-  }
-
-  function updateEntry(i: number, field: string, value: string) {
-    setEntries(entries.map((e, idx) => idx === i ? { ...e, [field]: value } : e))
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!clientId) { setError("Select a client."); return }
-    if (entries.some((en) => !en.projectId)) {
-      setError("All entries must have a project selected.")
-      return
-    }
-    setSaving(true)
-    setError("")
-
-    const res = await fetch("/api/timesheets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId,
-        weekStart: new Date(weekStart).toISOString(),
-        entries: entries.map((e) => ({
-          date: new Date(e.date).toISOString(),
-          hours: parseFloat(e.hours),
-          description: e.description,
-          projectId: e.projectId,
-        })),
-      }),
-    })
-
-    setSaving(false)
-    if (!res.ok) {
-      const data = await res.json()
-      setError(data.error ?? "Failed to create timesheet.")
-      return
-    }
-    onSaved()
-  }
-
-  const projectDisabled = !clientId || loadingProjects
-  const projectPlaceholder = !clientId
-    ? "Select a client first"
-    : loadingProjects
-    ? "Loading projects…"
-    : clientProjects.length === 0
-    ? "No projects — add one first"
-    : "Select…"
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-box max-w-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold">New Timesheet</h2>
-        </div>
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4 max-h-[80vh] overflow-y-auto">
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
-          )}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="label">Client *</label>
-              <select className="input" required value={clientId} onChange={(e) => handleClientChange(e.target.value)}>
-                <option value="">Select…</option>
-                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+      {/* Detail modal */}
+      {detail && (
+        <div className="modal-backdrop" onClick={() => { setDetail(null); setApproveOpen(false); setForceAction(null) }}>
+          <div className="modal-box max-w-3xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">{detail.client.name}</h2>
+                <p className="text-sm text-gray-500">{fmt(detail.periodStart)} – {fmt(detail.periodEnd)} · <span className={`badge ${statusClass(detail.status)}`}>{detail.status}</span></p>
+              </div>
+              <button onClick={() => downloadTimesheetCsv(detail)} className="btn-secondary btn text-sm">⬇ CSV</button>
             </div>
-            <div>
-              <label className="label">Week starting *</label>
-              <input type="date" className="input" required value={weekStart} onChange={(e) => setWeekStart(e.target.value)} />
-            </div>
-          </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="label mb-0">Entries *</label>
-              {entries.length < 7 && (
-                <button type="button" onClick={addEntry} className="text-xs text-blue-600 hover:underline">
-                  + Add day
-                </button>
+            <div className="px-6 py-4 space-y-4">
+              {detail.rejectionNote && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-sm font-medium text-red-800 mb-1">Rejection note</p>
+                  <p className="text-sm text-red-600">{detail.rejectionNote}</p>
+                </div>
+              )}
+
+              {/* Entries grouped by project/phase */}
+              {groupEntries(detail.entries).map((pg, pi) => (
+                <div key={pi}>
+                  <p className="text-sm font-semibold text-gray-700 mb-2">{pg.project ?? "No project"}</p>
+                  {Object.values(pg.phases).map((phg, phi) => (
+                    <div key={phi} className="mb-3">
+                      {phg.phase && <p className="text-xs text-gray-500 mb-1 ml-2">Phase: {phg.phase}</p>}
+                      <table className="data-table text-sm">
+                        <thead>
+                          <tr>
+                            {detail.status === "SUBMITTED" && isAdmin && <th className="w-8" />}
+                            <th>Date</th><th>Category</th><th>Hours</th><th>Bill.</th><th>Description</th><th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {phg.entries.map(e => (
+                            <tr key={e.id} className={partialReject.has(e.id) ? "bg-red-50" : partialSel.has(e.id) ? "bg-green-50" : ""}>
+                              {detail.status === "SUBMITTED" && isAdmin && (
+                                <td>
+                                  <div className="flex gap-0.5">
+                                    <input type="checkbox" title="Approve" checked={partialSel.has(e.id)} onChange={ev => {
+                                      setPartialSel(prev => { const s = new Set(prev); ev.target.checked ? s.add(e.id) : s.delete(e.id); return s })
+                                      setPartialReject(prev => { const s = new Set(prev); s.delete(e.id); return s })
+                                    }} className="w-3 h-3" />
+                                    <input type="checkbox" title="Reject" checked={partialReject.has(e.id)} onChange={ev => {
+                                      setPartialReject(prev => { const s = new Set(prev); ev.target.checked ? s.add(e.id) : s.delete(e.id); return s })
+                                      setPartialSel(prev => { const s = new Set(prev); s.delete(e.id); return s })
+                                    }} className="w-3 h-3 accent-red-500" />
+                                  </div>
+                                </td>
+                              )}
+                              <td>{fmt(e.date)}</td>
+                              <td>{e.category ? <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ backgroundColor: e.category.colour }} />{e.category.name}</span> : "—"}</td>
+                              <td>{Number(e.hours).toFixed(2)}</td>
+                              <td>{e.isBillable ? "✓" : "—"}</td>
+                              <td className="max-w-xs truncate">{e.description}</td>
+                              <td><span className={`badge text-xs ${statusClass(e.status)}`}>{e.status}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                </div>
+              ))}
+
+              {/* Totals */}
+              {(() => { const t = calcTotals(detail.entries, Number(detail.client.defaultRate ?? 0)); return (
+                <div className="bg-gray-50 rounded-lg p-3 grid grid-cols-3 gap-3 text-sm">
+                  <div><p className="text-gray-500">Total hours</p><p className="font-semibold">{t.total.toFixed(2)}h</p></div>
+                  <div><p className="text-gray-500">Billable</p><p className="font-semibold text-green-700">{t.billable.toFixed(2)}h</p></div>
+                  <div><p className="text-gray-500">Est. value</p><p className="font-semibold">{detail.client.invoiceCurrency} {t.value.toFixed(2)}</p></div>
+                </div>
+              )})()}
+
+              {/* Dates */}
+              <div className="text-xs text-gray-400 space-y-0.5">
+                {detail.submittedAt && <p>Submitted: {fmt(detail.submittedAt)}</p>}
+                {detail.approvedAt  && <p>Approved: {fmt(detail.approvedAt)} by {detail.approvedBy ?? "—"}</p>}
+              </div>
+
+              {/* Approval actions (SUBMITTED) */}
+              {detail.status === "SUBMITTED" && (
+                <div className="border-t pt-4 space-y-3">
+                  <p className="text-sm font-medium text-gray-700">Approval actions</p>
+
+                  {/* Standard approve/reject */}
+                  {!approveOpen ? (
+                    <div className="flex gap-2">
+                      <button onClick={() => doApprove(detail.id)} disabled={!!submitting} className="btn-primary btn text-sm">Approve all</button>
+                      <button onClick={() => setApproveOpen(true)} className="btn-danger btn text-sm">Reject</button>
+                      {isAdmin && partialSel.size > 0 && partialReject.size > 0 && (
+                        <button onClick={() => doPartialApprove(detail.id)} disabled={!!submitting} className="btn text-sm bg-amber-500 text-white hover:bg-amber-600">
+                          Partially approve ({partialSel.size} ✓ / {partialReject.size} ✗)
+                        </button>
+                      )}
+                      {isAdmin && <button onClick={() => doResendEmail(detail.id)} disabled={!!submitting} className="btn-secondary btn text-sm">Resend email</button>}
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <textarea rows={3} className="input text-sm w-full" placeholder="Rejection note (required)…" value={rejectNote} onChange={e => setRejectNote(e.target.value)} />
+                      <div className="flex gap-2">
+                        <button onClick={() => doReject(detail.id)} disabled={!rejectNote.trim() || !!submitting} className="btn-danger btn text-sm">Confirm Reject</button>
+                        <button onClick={() => { setApproveOpen(false); setRejectNote("") }} className="btn-secondary btn text-sm">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Admin overrides */}
+              {isAdmin && (
+                <div className="border-t pt-4 space-y-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Admin overrides</p>
+                  {!forceAction ? (
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => setForceAction("FORCE_APPROVE")} className="btn text-sm bg-green-600 text-white hover:bg-green-700">Force Approve</button>
+                      <button onClick={() => setForceAction("FORCE_REJECT")}  className="btn btn-danger text-sm">Force Reject</button>
+                      <button onClick={() => setForceAction("RESET_TO_DRAFT")} className="btn-secondary btn text-sm">Reset to Draft</button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <p className="text-sm font-medium text-amber-800">{forceAction.replace(/_/g," ")} — reason required</p>
+                      <textarea rows={2} className="input text-sm w-full" placeholder="Enter a mandatory reason…" value={forceReason} onChange={e => setForceReason(e.target.value)} />
+                      <div className="flex gap-2">
+                        <button onClick={() => doForce(detail.id)} disabled={!forceReason.trim() || !!submitting} className="btn-primary btn text-sm">Confirm</button>
+                        <button onClick={() => { setForceAction(null); setForceReason("") }} className="btn-secondary btn text-sm">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
 
-            {clientId && !loadingProjects && clientProjects.length === 0 && (
-              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-2">
-                No active projects for this client. <a href="/projects" className="underline">Create a project</a> first.
-              </p>
-            )}
-
-            <div className="space-y-2">
-              {entries.map((entry, i) => (
-                <div key={i} className="rounded-md border border-gray-200 bg-gray-50/50 p-3 space-y-2">
-                  <div className="grid grid-cols-12 gap-2 items-center">
-                    <div className="col-span-4">
-                      <input
-                        type="date"
-                        className="input text-xs"
-                        required
-                        value={entry.date}
-                        onChange={(e) => updateEntry(i, "date", e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-2">
-                      <input
-                        type="number"
-                        className="input text-xs"
-                        step="0.25"
-                        min="0.25"
-                        max="24"
-                        required
-                        placeholder="hrs"
-                        value={entry.hours}
-                        onChange={(e) => updateEntry(i, "hours", e.target.value)}
-                      />
-                    </div>
-                    <div className="col-span-5">
-                      <select
-                        className="input text-xs"
-                        required
-                        value={entry.projectId}
-                        onChange={(e) => updateEntry(i, "projectId", e.target.value)}
-                        disabled={projectDisabled || clientProjects.length === 0}
-                      >
-                        <option value="">{projectPlaceholder}</option>
-                        {clientProjects.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="col-span-1 flex justify-center">
-                      {entries.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeEntry(i)}
-                          className="text-gray-400 hover:text-red-500 text-xl leading-none"
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <textarea
-                    className="input text-xs resize-none"
-                    rows={2}
-                    placeholder="Description of work performed *"
-                    required
-                    value={entry.description}
-                    onChange={(e) => updateEntry(i, "description", e.target.value)}
-                  />
-                </div>
-              ))}
+            <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+              <button onClick={() => { setDetail(null); setApproveOpen(false); setForceAction(null) }} className="btn-secondary btn">Close</button>
             </div>
           </div>
-
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
-            <button type="submit" disabled={saving} className="btn-primary">
-              {saving ? "Creating…" : "Create timesheet"}
-            </button>
-          </div>
-        </form>
-      </div>
+        </div>
+      )}
     </div>
-  )
-}
-
-export default function TimesheetsPage() {
-  return (
-    <Suspense>
-      <TimesheetsContent />
-    </Suspense>
   )
 }
