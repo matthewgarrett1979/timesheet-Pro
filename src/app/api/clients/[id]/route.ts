@@ -14,27 +14,27 @@ import { z } from "zod"
 
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
-  reference: z.string().trim().max(50).optional(),
+  reference: z.string().trim().max(50).nullish(),
   // Company Details
-  companyName: z.string().trim().max(200).optional(),
-  tradingName: z.string().trim().max(200).optional(),
-  addressLine1: z.string().trim().max(200).optional(),
-  addressLine2: z.string().trim().max(200).nullable().optional(),
-  city: z.string().trim().max(100).optional(),
-  county: z.string().trim().max(100).nullable().optional(),
-  postcode: z.string().trim().max(20).optional(),
-  country: z.string().trim().max(100).optional(),
+  companyName: z.string().trim().max(200).nullish(),
+  tradingName: z.string().trim().max(200).nullish(),
+  addressLine1: z.string().trim().max(200).nullish(),
+  addressLine2: z.string().trim().max(200).nullish(),
+  city: z.string().trim().max(100).nullish(),
+  county: z.string().trim().max(100).nullish(),
+  postcode: z.string().trim().max(20).nullish(),
+  country: z.string().trim().max(100).optional(),     // non-nullable in DB, has default
   // Contact
-  contactName: z.string().trim().max(200).optional(),
-  contactEmail: z.string().trim().email().optional(),
-  contactPhone: z.string().trim().max(50).nullable().optional(),
+  contactName: z.string().trim().max(200).nullish(),
+  contactEmail: z.string().trim().email().nullish(),
+  contactPhone: z.string().trim().max(50).nullish(),
   // Invoice Settings
-  vatNumber: z.string().trim().max(50).nullable().optional(),
-  purchaseOrderNumber: z.string().trim().max(100).nullable().optional(),
-  invoicePaymentTerms: z.number().int().positive().nullable().optional(),
-  invoiceCurrency: z.string().trim().length(3).optional(),
+  vatNumber: z.string().trim().max(50).nullish(),
+  purchaseOrderNumber: z.string().trim().max(100).nullish(),
+  invoicePaymentTerms: z.number().int().positive().nullish(),
+  invoiceCurrency: z.string().trim().length(3).optional(), // non-nullable in DB, has default
   // Internal
-  notes: z.string().trim().max(2000).nullable().optional(),
+  notes: z.string().trim().max(2000).nullish(),
   // Approval workflow
   approvalType: z.enum(["EMAIL", "PORTAL", "NONE"]).optional(),
   approvalGranularity: z.enum(["TIMESHEET", "MONTHLY", "QUARTERLY"]).optional(),
