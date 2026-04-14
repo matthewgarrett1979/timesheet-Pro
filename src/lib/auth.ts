@@ -4,13 +4,12 @@
  * Security properties:
  * - argon2id password hashing (see password.ts)
  * - Account lockout after MAX_FAILED_ATTEMPTS consecutive failures
- * - Database sessions (server-side revocable, 8-hour max age)
- * - MFA state tracked per-session via custom mfaVerified column
+ * - JWT sessions (CredentialsProvider requires JWT, not database sessions)
+ * - MFA state tracked in the JWT token, updated via session.update()
  * - All auth events written to immutable audit log
  */
 import { NextAuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
-import { PrismaAdapter } from "@auth/prisma-adapter"
 import { db } from "./db"
 import { verifyPassword } from "./password"
 import { audit } from "./audit"
@@ -21,13 +20,11 @@ const LOCKOUT_MS = 15 * 60 * 1000   // 15 minutes
 const SESSION_MAX_AGE = 8 * 60 * 60 // 8 hours in seconds
 
 export const authOptions: NextAuthOptions = {
-  // Database sessions — can be revoked server-side (security incidents, logout)
-  adapter: PrismaAdapter(db) as NextAuthOptions["adapter"],
-
+  // JWT strategy — required for CredentialsProvider.
+  // Database sessions only work with OAuth providers.
   session: {
-    strategy: "database",
+    strategy: "jwt",
     maxAge: SESSION_MAX_AGE,
-    updateAge: 60 * 60, // Refresh session expiry every hour of activity
   },
 
   providers: [
@@ -134,11 +131,12 @@ export const authOptions: NextAuthOptions = {
           success: true,
         })
 
+        // Return the fields we need in the JWT. NextAuth merges these into
+        // the User object received by the jwt() callback as `user`.
         return {
           id: user.id,
           email: user.email,
           name: user.name,
-          // Extra fields surfaced to the session callback
           role: user.role,
           mfaEnabled: user.mfaEnabled,
         }
@@ -147,28 +145,48 @@ export const authOptions: NextAuthOptions = {
   ],
 
   callbacks: {
-    async session({ session, user }) {
-      // Augment session with role, mfaEnabled, and per-session mfaVerified
-      const dbUser = await db.user.findUnique({
-        where: { id: user.id },
-        select: { role: true, mfaEnabled: true },
-      })
+    /**
+     * Runs on every sign-in and on every session refresh.
+     *
+     * On first sign-in `user` is set (the object returned by authorize()).
+     * On subsequent calls `user` is undefined and the existing token is
+     * passed in.
+     *
+     * When the client calls update({ mfaVerified: true }), NextAuth
+     * re-invokes this callback with trigger="update" and the session
+     * data in `session`, allowing us to flip the flag in the JWT.
+     */
+    async jwt({ token, user, trigger, session }) {
+      if (user) {
+        // Populate token from the object returned by authorize()
+        token.id = user.id
+        token.role = (user as { role: Role }).role
+        token.mfaEnabled = (user as { mfaEnabled: boolean }).mfaEnabled
+        // mfaVerified starts true if MFA is not enabled on the account
+        token.mfaVerified = !(user as { mfaEnabled: boolean }).mfaEnabled
+      }
 
-      // Fetch the current session's mfaVerified flag
-      const dbSession = await db.session.findFirst({
-        where: { userId: user.id, expires: { gt: new Date() } },
-        orderBy: { expires: "desc" },
-        select: { mfaVerified: true },
-      })
+      // Client called update({ mfaVerified: true }) after TOTP/recovery success
+      if (trigger === "update" && session?.mfaVerified === true) {
+        token.mfaVerified = true
+      }
 
+      return token
+    },
+
+    /**
+     * Shapes the session object returned by getServerSession() and
+     * useSession(). Reads from the JWT token (not from the database).
+     */
+    async session({ session, token }) {
       return {
         ...session,
         user: {
           ...session.user,
-          id: user.id,
-          role: dbUser?.role ?? Role.MANAGER,
-          mfaEnabled: dbUser?.mfaEnabled ?? false,
-          mfaVerified: dbSession?.mfaVerified ?? !dbUser?.mfaEnabled,
+          id: token.id as string,
+          role: token.role as Role,
+          mfaEnabled: token.mfaEnabled as boolean,
+          mfaVerified: token.mfaVerified as boolean,
         },
       }
     },
@@ -180,15 +198,18 @@ export const authOptions: NextAuthOptions = {
   },
 
   events: {
-    async signOut({ session }) {
-      if (!session) return
-      const s = session as { userId?: string }
-      if (s.userId) {
+    // Works for both JWT (token) and database (session) strategies
+    async signOut(message) {
+      const userId =
+        "token" in message
+          ? (message.token as { id?: string })?.id
+          : (message.session as { userId?: string })?.userId
+      if (userId) {
         await audit({
-          userId: s.userId,
+          userId,
           action: AuditAction.USER_LOGOUT,
           resource: "auth",
-          resourceId: s.userId,
+          resourceId: userId,
           success: true,
         })
       }

@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { signOut } from "next-auth/react"
+import { signOut, useSession } from "next-auth/react"
 
 type View = "totp" | "recovery"
 
@@ -12,6 +12,7 @@ export default function MfaPage() {
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const { update } = useSession()
 
   async function handleTotp(e: React.FormEvent) {
     e.preventDefault()
@@ -33,6 +34,7 @@ export default function MfaPage() {
       return
     }
 
+    await update({ mfaVerified: true })
     router.push("/dashboard")
     router.refresh()
   }
@@ -63,6 +65,7 @@ export default function MfaPage() {
       console.warn(data.warning)
     }
 
+    await update({ mfaVerified: true })
     router.push("/dashboard")
     router.refresh()
   }
