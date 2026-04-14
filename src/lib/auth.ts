@@ -4,13 +4,12 @@
  * Security properties:
  * - argon2id password hashing (see password.ts)
  * - Account lockout after MAX_FAILED_ATTEMPTS consecutive failures
- * - Database sessions (server-side revocable, 8-hour max age)
- * - MFA state tracked per-session via custom mfaVerified column
+ * - JWT sessions (CredentialsProvider requires JWT, not database sessions)
+ * - MFA state tracked in the JWT token, updated via session.update()
  * - All auth events written to immutable audit log
  */
 import { NextAuthOptions } from "next-auth"
 import CredentialsProvider from "next-auth/providers/credentials"
-import { PrismaAdapter } from "@auth/prisma-adapter"
 import { db } from "./db"
 import { verifyPassword } from "./password"
 import { audit } from "./audit"
@@ -21,13 +20,11 @@ const LOCKOUT_MS = 15 * 60 * 1000   // 15 minutes
 const SESSION_MAX_AGE = 8 * 60 * 60 // 8 hours in seconds
 
 export const authOptions: NextAuthOptions = {
-  // Database sessions — can be revoked server-side (security incidents, logout)
-  adapter: PrismaAdapter(db) as NextAuthOptions["adapter"],
-
+  // JWT strategy — required for CredentialsProvider.
+  // Database sessions only work with OAuth providers.
   session: {
-    strategy: "database",
+    strategy: "jwt",
     maxAge: SESSION_MAX_AGE,
-    updateAge: 60 * 60, // Refresh session expiry every hour of activity
   },
 
   providers: [
@@ -39,136 +36,180 @@ export const authOptions: NextAuthOptions = {
       },
 
       async authorize(credentials, req) {
-        if (!credentials?.email || !credentials?.password) {
-          return null
-        }
+        try {
+          if (!credentials?.email || !credentials?.password) {
+            return null
+          }
 
-        const ip =
-          (req.headers?.["x-forwarded-for"] as string | undefined)
-            ?.split(",")[0]
-            .trim() ?? "unknown"
-        const ua = (req.headers?.["user-agent"] as string | undefined) ?? "unknown"
-        const email = credentials.email.toLowerCase().trim()
+          const ip =
+            (req.headers?.["x-forwarded-for"] as string | undefined)
+              ?.split(",")[0]
+              .trim() ?? "unknown"
+          const ua = (req.headers?.["user-agent"] as string | undefined) ?? "unknown"
+          const email = credentials.email.toLowerCase().trim()
 
-        const user = await db.user.findUnique({ where: { email } })
+          const user = await db.user.findUnique({ where: { email } })
 
-        if (!user) {
-          // Constant-time path: don't reveal that the account doesn't exist
-          await audit({
-            action: AuditAction.USER_LOGIN_FAILED,
-            resource: "auth",
-            metadata: { reason: "user_not_found" },
-            ipAddress: ip,
-            userAgent: ua,
-            success: false,
-          })
-          return null
-        }
+          if (!user) {
+            // Constant-time path: don't reveal that the account doesn't exist
+            try {
+              await audit({
+                action: AuditAction.USER_LOGIN_FAILED,
+                resource: "auth",
+                metadata: { reason: "user_not_found" },
+                ipAddress: ip,
+                userAgent: ua,
+                success: false,
+              })
+            } catch (auditErr) {
+              console.error("[auth] audit failed (user_not_found):", auditErr)
+            }
+            return null
+          }
 
-        // Check lockout
-        if (user.lockedUntil && user.lockedUntil > new Date()) {
-          await audit({
-            userId: user.id,
-            action: AuditAction.USER_LOGIN_FAILED,
-            resource: "auth",
-            resourceId: user.id,
-            metadata: {
-              reason: "account_locked",
-              lockedUntil: user.lockedUntil,
-            },
-            ipAddress: ip,
-            userAgent: ua,
-            success: false,
-          })
-          throw new Error("AccountLocked")
-        }
+          // Check lockout
+          if (user.lockedUntil && user.lockedUntil > new Date()) {
+            try {
+              await audit({
+                userId: user.id,
+                action: AuditAction.USER_LOGIN_FAILED,
+                resource: "auth",
+                resourceId: user.id,
+                metadata: {
+                  reason: "account_locked",
+                  lockedUntil: user.lockedUntil,
+                },
+                ipAddress: ip,
+                userAgent: ua,
+                success: false,
+              })
+            } catch (auditErr) {
+              console.error("[auth] audit failed (account_locked):", auditErr)
+            }
+            throw new Error("AccountLocked")
+          }
 
-        const valid = await verifyPassword(credentials.password, user.passwordHash)
+          const valid = await verifyPassword(credentials.password, user.passwordHash)
 
-        if (!valid) {
-          const newCount = user.failedLogins + 1
-          const lock = newCount >= MAX_FAILED_ATTEMPTS
+          if (!valid) {
+            const newCount = user.failedLogins + 1
+            const lock = newCount >= MAX_FAILED_ATTEMPTS
 
+            await db.user.update({
+              where: { id: user.id },
+              data: {
+                failedLogins: newCount,
+                lockedUntil: lock
+                  ? new Date(Date.now() + LOCKOUT_MS)
+                  : undefined,
+              },
+            })
+
+            try {
+              await audit({
+                userId: user.id,
+                action: lock ? AuditAction.USER_LOCKED : AuditAction.USER_LOGIN_FAILED,
+                resource: "auth",
+                resourceId: user.id,
+                metadata: {
+                  reason: "invalid_password",
+                  failedAttempts: newCount,
+                  locked: lock,
+                },
+                ipAddress: ip,
+                userAgent: ua,
+                success: false,
+              })
+            } catch (auditErr) {
+              console.error("[auth] audit failed (invalid_password):", auditErr)
+            }
+
+            return null
+          }
+
+          // Success — reset counters
           await db.user.update({
             where: { id: user.id },
-            data: {
-              failedLogins: newCount,
-              lockedUntil: lock
-                ? new Date(Date.now() + LOCKOUT_MS)
-                : undefined,
-            },
+            data: { failedLogins: 0, lockedUntil: null },
           })
 
-          await audit({
-            userId: user.id,
-            action: lock ? AuditAction.USER_LOCKED : AuditAction.USER_LOGIN_FAILED,
-            resource: "auth",
-            resourceId: user.id,
-            metadata: {
-              reason: "invalid_password",
-              failedAttempts: newCount,
-              locked: lock,
-            },
-            ipAddress: ip,
-            userAgent: ua,
-            success: false,
-          })
+          try {
+            await audit({
+              userId: user.id,
+              action: AuditAction.USER_LOGIN,
+              resource: "auth",
+              resourceId: user.id,
+              metadata: { mfaRequired: user.mfaEnabled },
+              ipAddress: ip,
+              userAgent: ua,
+              success: true,
+            })
+          } catch (auditErr) {
+            console.error("[auth] audit failed (login_success):", auditErr)
+          }
 
+          // Return the fields we need in the JWT. NextAuth merges these into
+          // the User object received by the jwt() callback as `user`.
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            mfaEnabled: user.mfaEnabled,
+          }
+        } catch (err) {
+          // Re-throw AccountLocked so NextAuth surfaces it to the client
+          if (err instanceof Error && err.message === "AccountLocked") throw err
+          console.error("[auth] authorize error:", err)
           return null
-        }
-
-        // Success — reset counters
-        await db.user.update({
-          where: { id: user.id },
-          data: { failedLogins: 0, lockedUntil: null },
-        })
-
-        await audit({
-          userId: user.id,
-          action: AuditAction.USER_LOGIN,
-          resource: "auth",
-          resourceId: user.id,
-          metadata: { mfaRequired: user.mfaEnabled },
-          ipAddress: ip,
-          userAgent: ua,
-          success: true,
-        })
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          // Extra fields surfaced to the session callback
-          role: user.role,
-          mfaEnabled: user.mfaEnabled,
         }
       },
     }),
   ],
 
   callbacks: {
-    async session({ session, user }) {
-      // Augment session with role, mfaEnabled, and per-session mfaVerified
-      const dbUser = await db.user.findUnique({
-        where: { id: user.id },
-        select: { role: true, mfaEnabled: true },
-      })
+    /**
+     * Runs on every sign-in and on every session refresh.
+     *
+     * On first sign-in `user` is set (the object returned by authorize()).
+     * On subsequent calls `user` is undefined and the existing token is
+     * passed in.
+     *
+     * When the client calls update({ mfaVerified: true }), NextAuth
+     * re-invokes this callback with trigger="update" and the session
+     * data in `session`, allowing us to flip the flag in the JWT.
+     */
+    async jwt({ token, user, trigger, session }) {
+      if (user) {
+        // Populate token from the object returned by authorize()
+        token.id = user.id
+        token.role = (user as { role: Role }).role
+        token.mfaEnabled = (user as { mfaEnabled: boolean }).mfaEnabled
+        // mfaVerified starts true if MFA is not enabled on the account
+        token.mfaVerified = !(user as { mfaEnabled: boolean }).mfaEnabled
+      }
 
-      // Fetch the current session's mfaVerified flag
-      const dbSession = await db.session.findFirst({
-        where: { userId: user.id, expires: { gt: new Date() } },
-        orderBy: { expires: "desc" },
-        select: { mfaVerified: true },
-      })
+      // Client called update({ mfaVerified: true }) after TOTP/recovery success
+      if (trigger === "update" && session?.mfaVerified === true) {
+        token.mfaVerified = true
+      }
 
+      return token
+    },
+
+    /**
+     * Shapes the session object returned by getServerSession() and
+     * useSession(). Reads from the JWT token (not from the database).
+     */
+    async session({ session, token }) {
       return {
         ...session,
         user: {
           ...session.user,
-          id: user.id,
-          role: dbUser?.role ?? Role.MANAGER,
-          mfaEnabled: dbUser?.mfaEnabled ?? false,
-          mfaVerified: dbSession?.mfaVerified ?? !dbUser?.mfaEnabled,
+          id: token.id as string,
+          role: token.role as Role,
+          mfaEnabled: token.mfaEnabled as boolean,
+          mfaVerified: token.mfaVerified as boolean,
         },
       }
     },
@@ -180,17 +221,23 @@ export const authOptions: NextAuthOptions = {
   },
 
   events: {
-    async signOut({ session }) {
-      if (!session) return
-      const s = session as { userId?: string }
-      if (s.userId) {
-        await audit({
-          userId: s.userId,
-          action: AuditAction.USER_LOGOUT,
-          resource: "auth",
-          resourceId: s.userId,
-          success: true,
-        })
+    async signOut(message) {
+      const userId =
+        "token" in message
+          ? (message.token as { id?: string })?.id
+          : undefined
+      if (userId) {
+        try {
+          await audit({
+            userId,
+            action: AuditAction.USER_LOGOUT,
+            resource: "auth",
+            resourceId: userId,
+            success: true,
+          })
+        } catch (auditErr) {
+          console.error("[auth] audit failed (logout):", auditErr)
+        }
       }
     },
   },

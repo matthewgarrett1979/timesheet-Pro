@@ -2,14 +2,23 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom CSS variables used throughout the app */
+/* Custom CSS variables used throughout the app.
+   Theme values are overridden at runtime by (protected)/layout.tsx
+   via a server-rendered <style> tag. */
 @layer base {
   :root {
     --sidebar-width: 240px;
+    /* Theme defaults — overridden per-request from AppSettings */
+    --color-nav-bg:   #1e293b;  /* slate-900  — sidebar background  */
+    --color-accent:   #2563eb;  /* blue-600   — active items/buttons */
+    --color-page-bg:  #f9fafb;  /* gray-50    — page background      */
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
   }
 
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
+    @apply text-gray-900 antialiased;
+    background-color: var(--color-page-bg);
+    font-family: var(--font-body);
   }
 
   /* Focus ring for accessibility */

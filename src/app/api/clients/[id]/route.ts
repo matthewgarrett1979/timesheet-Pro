@@ -15,6 +15,29 @@ import { z } from "zod"
 const updateSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
   reference: z.string().trim().max(50).optional(),
+  // Company Details
+  companyName: z.string().trim().max(200).optional(),
+  tradingName: z.string().trim().max(200).optional(),
+  addressLine1: z.string().trim().max(200).optional(),
+  addressLine2: z.string().trim().max(200).nullable().optional(),
+  city: z.string().trim().max(100).optional(),
+  county: z.string().trim().max(100).nullable().optional(),
+  postcode: z.string().trim().max(20).optional(),
+  country: z.string().trim().max(100).optional(),
+  // Contact
+  contactName: z.string().trim().max(200).optional(),
+  contactEmail: z.string().trim().email().optional(),
+  contactPhone: z.string().trim().max(50).nullable().optional(),
+  // Invoice Settings
+  vatNumber: z.string().trim().max(50).nullable().optional(),
+  purchaseOrderNumber: z.string().trim().max(100).nullable().optional(),
+  invoicePaymentTerms: z.number().int().positive().nullable().optional(),
+  invoiceCurrency: z.string().trim().length(3).optional(),
+  // Internal
+  notes: z.string().trim().max(2000).nullable().optional(),
+  // Approval workflow
+  approvalType: z.enum(["EMAIL", "PORTAL", "NONE"]).optional(),
+  approvalGranularity: z.enum(["TIMESHEET", "MONTHLY", "QUARTERLY"]).optional(),
 })
 
 async function getAuthedSession(req: NextRequest) {

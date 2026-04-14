@@ -54,7 +54,7 @@ export function verifyTotp(encryptedSecret: string, token: string): boolean {
 export async function generateQrCode(
   encryptedSecret: string,
   userEmail: string,
-  appName = "Timesheet Pro"
+  appName = "Tech Timesheet"
 ): Promise<string> {
   const secret = decrypt(encryptedSecret)
   const otpauth = authenticator.keyuri(userEmail, appName, secret)

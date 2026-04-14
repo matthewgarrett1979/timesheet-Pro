@@ -4,7 +4,7 @@ import "./globals.css"
 import Providers from "@/components/Providers"
 
 export const metadata: Metadata = {
-  title: "Timesheet Pro",
+  title: "Tech Timesheet",
   description: "Timesheet and billing management",
   // Prevent search engine indexing — this is an internal tool
   robots: { index: false, follow: false },

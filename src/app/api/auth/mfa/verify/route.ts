@@ -19,7 +19,6 @@ import { audit, getClientIp } from "@/lib/audit"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { AuditAction } from "@prisma/client"
 import { z } from "zod"
-import { cookies } from "next/headers"
 
 const bodySchema = z.object({
   code: z
@@ -106,18 +105,6 @@ export async function POST(req: NextRequest) {
       ipAddress: ip,
       userAgent: ua,
       success: true,
-    })
-  }
-
-  // Mark the current database session as MFA-verified.
-  // NextAuth stores the session token in the next-auth.session-token cookie.
-  const sessionToken = (await cookies()).get("next-auth.session-token")?.value
-    ?? (await cookies()).get("__Secure-next-auth.session-token")?.value
-
-  if (sessionToken) {
-    await db.session.updateMany({
-      where: { sessionToken, userId },
-      data: { mfaVerified: true },
     })
   }
 
