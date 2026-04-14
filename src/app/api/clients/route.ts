@@ -15,6 +15,26 @@ import { z } from "zod"
 const createSchema = z.object({
   name: z.string().trim().min(1).max(200),
   reference: z.string().trim().max(50).optional(),
+  // Company Details
+  companyName: z.string().trim().max(200).optional(),
+  tradingName: z.string().trim().max(200).optional(),
+  addressLine1: z.string().trim().max(200).optional(),
+  addressLine2: z.string().trim().max(200).optional(),
+  city: z.string().trim().max(100).optional(),
+  county: z.string().trim().max(100).optional(),
+  postcode: z.string().trim().max(20).optional(),
+  country: z.string().trim().max(100).optional(),
+  // Contact
+  contactName: z.string().trim().max(200).optional(),
+  contactEmail: z.string().trim().email().optional(),
+  contactPhone: z.string().trim().max(50).optional(),
+  // Invoice Settings
+  vatNumber: z.string().trim().max(50).optional(),
+  purchaseOrderNumber: z.string().trim().max(100).optional(),
+  invoicePaymentTerms: z.number().int().positive().optional(),
+  invoiceCurrency: z.string().trim().length(3).optional(),
+  // Internal
+  notes: z.string().trim().max(2000).optional(),
 })
 
 export async function GET(req: NextRequest) {
@@ -62,7 +82,23 @@ export async function POST(req: NextRequest) {
     data: {
       name: body.name,
       reference: body.reference,
-      managerId: session.user.id, // always scoped to the authenticated user
+      companyName: body.companyName,
+      tradingName: body.tradingName,
+      addressLine1: body.addressLine1,
+      addressLine2: body.addressLine2,
+      city: body.city,
+      county: body.county,
+      postcode: body.postcode,
+      country: body.country ?? "United Kingdom",
+      contactName: body.contactName,
+      contactEmail: body.contactEmail,
+      contactPhone: body.contactPhone,
+      vatNumber: body.vatNumber,
+      purchaseOrderNumber: body.purchaseOrderNumber,
+      invoicePaymentTerms: body.invoicePaymentTerms,
+      invoiceCurrency: body.invoiceCurrency ?? "GBP",
+      notes: body.notes,
+      managerId: session.user.id,
     },
   })
 

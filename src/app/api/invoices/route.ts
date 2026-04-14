@@ -104,7 +104,38 @@ export async function POST(req: NextRequest) {
         xeroAccessTokenEnc,
         xeroRefreshTokenEnc,
       },
-      include: { client: { select: { id: true, name: true } } },
+      // Include all client billing fields needed for invoice rendering and
+      // Xero push. Xero field mapping:
+      //   contact.Name          → client.companyName ?? client.name
+      //   contact.EmailAddress  → client.contactEmail
+      //   contact.TaxNumber     → client.vatNumber          (GB VAT reg)
+      //   contact.Addresses[0]  → addressLine1/2, city, county, postcode, country
+      //   invoice.Reference     → client.purchaseOrderNumber
+      //   invoice.DueDateDays   → client.invoicePaymentTerms
+      //   invoice.CurrencyCode  → client.invoiceCurrency
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            companyName: true,
+            tradingName: true,
+            addressLine1: true,
+            addressLine2: true,
+            city: true,
+            county: true,
+            postcode: true,
+            country: true,
+            vatNumber: true,
+            contactName: true,
+            contactEmail: true,
+            contactPhone: true,
+            purchaseOrderNumber: true,
+            invoicePaymentTerms: true,
+            invoiceCurrency: true,
+          },
+        },
+      },
     })
 
     // Mark timesheets as INVOICED
