@@ -54,6 +54,14 @@ const envSchema = z.object({
 })
 
 function validateEnv() {
+  // During `next build` Next.js runs static analysis (collecting page data)
+  // in a build worker that does not have runtime secrets injected. Validation
+  // only makes sense when the server is actually serving requests.
+  // NEXT_PHASE=phase-production-build is set automatically by Next.js.
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return process.env as unknown as z.infer<typeof envSchema>
+  }
+
   const result = envSchema.safeParse(process.env)
 
   if (!result.success) {
@@ -69,5 +77,5 @@ function validateEnv() {
   return result.data
 }
 
-// Validated on first import — fails fast at startup
+// Validated on first import — fails fast at startup (skipped during next build)
 export const env = validateEnv()
