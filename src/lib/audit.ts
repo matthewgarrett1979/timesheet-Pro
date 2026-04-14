@@ -35,7 +35,7 @@ export async function audit(params: AuditParams): Promise<void> {
         action: params.action,
         resource: params.resource,
         resourceId: params.resourceId ?? null,
-        metadata: params.metadata ?? null,
+        metadata: params.metadata,
         ipAddress: params.ipAddress ?? null,
         userAgent: truncate(params.userAgent, 512) ?? null,
         success: params.success,
