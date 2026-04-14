@@ -47,7 +47,10 @@ export async function middleware(req: NextRequest) {
     // Retrieve the session token from the cookie (Edge-compatible)
     const token = await getToken({
       req,
-      secret: process.env.NEXTAUTH_SECRET,
+      // NEXTAUTH_SECRET is validated at startup (env.ts); the ?? "" satisfies
+      // the string type without introducing a silent security hole because a
+      // blank secret would mean getToken() always returns null → login redirect.
+      secret: process.env.NEXTAUTH_SECRET ?? "",
     })
 
     if (!token) {

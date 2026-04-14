@@ -14,7 +14,7 @@ import { PrismaAdapter } from "@auth/prisma-adapter"
 import { db } from "./db"
 import { verifyPassword } from "./password"
 import { audit } from "./audit"
-import { AuditAction } from "@prisma/client"
+import { AuditAction, Role } from "@prisma/client"
 
 const MAX_FAILED_ATTEMPTS = 5
 const LOCKOUT_MS = 15 * 60 * 1000   // 15 minutes
@@ -166,7 +166,7 @@ export const authOptions: NextAuthOptions = {
         user: {
           ...session.user,
           id: user.id,
-          role: dbUser?.role,
+          role: dbUser?.role ?? Role.MANAGER,
           mfaEnabled: dbUser?.mfaEnabled ?? false,
           mfaVerified: dbSession?.mfaVerified ?? !dbUser?.mfaEnabled,
         },

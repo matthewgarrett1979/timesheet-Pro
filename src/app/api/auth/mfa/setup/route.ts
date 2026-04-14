@@ -51,7 +51,10 @@ export async function POST(req: NextRequest) {
   })
 
   // Build QR code
-  const qrCodeDataUri = await generateQrCode(encryptedSecret, session.user.email!)
+  const qrCodeDataUri = await generateQrCode(
+    encryptedSecret,
+    session.user.email ?? session.user.id
+  )
 
   await audit({
     userId,

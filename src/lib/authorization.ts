@@ -8,7 +8,7 @@
  * An ADMIN can read all resources but still cannot read another user's
  * encrypted secrets.
  */
-import { Role } from "@prisma/client"
+import { Role, TimesheetStatus } from "@prisma/client"
 import { db } from "./db"
 
 // ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ export async function listTimesheetsForUser(
     where: {
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
       ...(filters?.clientId ? { clientId: filters.clientId } : {}),
-      ...(filters?.status ? { status: filters.status as never } : {}),
+      ...(filters?.status ? { status: filters.status as TimesheetStatus } : {}),
     },
     include: { client: { select: { id: true, name: true, reference: true } } },
     orderBy: { weekStart: "desc" },

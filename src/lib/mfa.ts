@@ -6,7 +6,7 @@
  * - QR codes are generated server-side and returned as data URIs.
  */
 import { authenticator } from "otplib"
-import qrcode from "qrcode"
+import { toDataURL as qrcodeDataUrl } from "qrcode"
 import { randomBytes } from "crypto"
 import { encrypt, decrypt } from "./crypto"
 import { hashPassword, verifyPassword } from "./password"
@@ -58,7 +58,7 @@ export async function generateQrCode(
 ): Promise<string> {
   const secret = decrypt(encryptedSecret)
   const otpauth = authenticator.keyuri(userEmail, appName, secret)
-  return qrcode.toDataURL(otpauth)
+  return qrcodeDataUrl(otpauth)
 }
 
 // ---------------------------------------------------------------------------
