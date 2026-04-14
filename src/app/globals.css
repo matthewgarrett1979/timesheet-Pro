@@ -3,13 +3,14 @@
 @tailwind utilities;
 
 /* Custom CSS variables used throughout the app.
-   Theme values are overridden at runtime by (protected)/layout.tsx
-   via a server-rendered <style> tag. */
+   Theme values are overridden per-request via style="" on <html> in layout.tsx
+   (fetched from AppSettings in DB). Style attributes are not subject to CSP
+   style-src restrictions, unlike <style> tags which require a nonce. */
 @layer base {
   :root {
     --sidebar-width: 240px;
-    /* Theme defaults — overridden per-request from AppSettings */
-    --color-nav-bg:   #1e293b;  /* slate-900  — sidebar background  */
+    /* Theme defaults — overridden per-request from AppSettings (set on <html> in layout.tsx) */
+    --color-nav-bg:   #1e3a5f;  /* dark navy  — sidebar background  */
     --color-accent:   #2563eb;  /* blue-600   — active items/buttons */
     --color-page-bg:  #f9fafb;  /* gray-50    — page background      */
     --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -68,8 +69,11 @@
     @apply inline-flex items-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline-none;
   }
   .btn-primary {
-    @apply btn bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800;
+    @apply btn text-white;
+    background-color: var(--color-accent, #2563eb);
   }
+  .btn-primary:hover  { filter: brightness(0.88); }
+  .btn-primary:active { filter: brightness(0.78); }
   .btn-secondary {
     @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50;
   }
