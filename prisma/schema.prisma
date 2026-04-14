@@ -132,6 +132,7 @@ model Client {
   purchaseOrderNumber String?  // Many defence clients require a PO on invoices
   invoicePaymentTerms Int?     // Days — overrides company default if set
   invoiceCurrency     String   @default("GBP")
+  defaultRate         Decimal? @db.Decimal(10, 2)  // Default hourly rate for this client
   notes               String?  // Internal only — never shown on invoice
 
   // Approval workflow
@@ -153,14 +154,17 @@ model Client {
 }
 
 model Project {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-  clientId    String
-  client      Client   @relation(fields: [clientId], references: [id])
-  managerId   String
-  manager     User     @relation(fields: [managerId], references: [id])
-  active      Boolean  @default(true)
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  clientId     String
+  client       Client   @relation(fields: [clientId], references: [id])
+  managerId    String
+  manager      User     @relation(fields: [managerId], references: [id])
+  active       Boolean  @default(true)
+  rateOverride Decimal? @db.Decimal(10, 2)  // Overrides client defaultRate when set
+
+  timesheetEntries TimesheetEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -199,6 +203,8 @@ model TimesheetEntry {
   id          String    @id @default(cuid())
   timesheetId String
   timesheet   Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  projectId   String?
+  project     Project?  @relation(fields: [projectId], references: [id])
   date        DateTime  @db.Date
   hours       Decimal   @db.Decimal(5, 2)
   description String
@@ -208,6 +214,7 @@ model TimesheetEntry {
   updatedAt DateTime @updatedAt
 
   @@index([timesheetId])
+  @@index([projectId])
 }
 
 model Expense {

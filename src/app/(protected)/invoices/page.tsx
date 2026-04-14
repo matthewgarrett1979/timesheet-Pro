@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 
 interface BillingClient {
   id: string
@@ -20,13 +20,22 @@ interface BillingClient {
   purchaseOrderNumber: string | null
   invoicePaymentTerms: number | null
   invoiceCurrency: string
+  defaultRate: string | null
+}
+
+interface TimesheetEntry {
+  id: string
+  hours: number | string
+  projectId: string | null
+  project: { id: string; name: string; rateOverride: string | null } | null
 }
 
 interface Timesheet {
   id: string
   weekStart: string
   status: string
-  client: { id: string; name: string }
+  client: { id: string; name: string; defaultRate: string | null }
+  entries: TimesheetEntry[]
 }
 
 interface Invoice {
@@ -218,10 +227,36 @@ function CreateInvoiceModal({
   const selectedClient = clients.find((c) => c.id === clientId) ?? null
   const forClient = approvedTimesheets.filter((ts) => ts.client.id === clientId)
 
+  // Compute project-grouped line items from selected timesheets
+  const lineItems = useMemo(() => {
+    const selected = approvedTimesheets.filter((ts) => selectedIds.includes(ts.id))
+    const clientDefaultRate = parseFloat(selectedClient?.defaultRate ?? "") || 0
+    const grouped: Record<string, { projectId: string; projectName: string; hours: number; rate: number }> = {}
+
+    for (const ts of selected) {
+      for (const entry of ts.entries ?? []) {
+        if (!entry.project) continue
+        const key = entry.project.id
+        const rate = parseFloat(entry.project.rateOverride ?? "") || clientDefaultRate
+        if (!grouped[key]) {
+          grouped[key] = { projectId: key, projectName: entry.project.name, hours: 0, rate }
+        }
+        grouped[key].hours += parseFloat(String(entry.hours))
+      }
+    }
+
+    return Object.values(grouped)
+  }, [approvedTimesheets, selectedIds, selectedClient])
+
+  // Auto-populate amount from line items
+  useEffect(() => {
+    const total = lineItems.reduce((sum, li) => sum + li.hours * li.rate, 0)
+    if (total > 0) setAmount(total.toFixed(2))
+  }, [lineItems])
+
   function handleClientChange(id: string) {
     setClientId(id)
     setSelectedIds([])
-    // Auto-populate currency from client's invoice currency preference
     const c = clients.find((cl) => cl.id === id)
     if (c) setCurrency(c.invoiceCurrency ?? "GBP")
   }
@@ -262,7 +297,7 @@ function CreateInvoiceModal({
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold">Generate Invoice</h2>
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4 max-h-[85vh] overflow-y-auto">
           {error && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
           )}
@@ -282,7 +317,7 @@ function CreateInvoiceModal({
             </select>
           </div>
 
-          {/* Client billing summary — shown once a client is selected */}
+          {/* Client billing summary */}
           {selectedClient && (
             <div className="rounded-md bg-gray-50 border border-gray-200 px-3 py-2 text-xs text-gray-500 space-y-0.5">
               {formatAddress(selectedClient).map((line, i) => <p key={i}>{line}</p>)}
@@ -293,6 +328,9 @@ function CreateInvoiceModal({
               {selectedClient.invoicePaymentTerms && (
                 <p>Payment terms: {selectedClient.invoicePaymentTerms} days</p>
               )}
+              {selectedClient.defaultRate && (
+                <p>Default rate: {currency} {parseFloat(selectedClient.defaultRate).toFixed(2)}/hr</p>
+              )}
             </div>
           )}
 
@@ -300,16 +338,24 @@ function CreateInvoiceModal({
             <div>
               <label className="label">Approved timesheets *</label>
               <div className="space-y-1 max-h-40 overflow-y-auto border border-gray-200 rounded p-2">
-                {forClient.map((ts) => (
-                  <label key={ts.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.includes(ts.id)}
-                      onChange={() => toggleTs(ts.id)}
-                    />
-                    <span>Week of {new Date(ts.weekStart).toLocaleDateString("en-GB")}</span>
-                  </label>
-                ))}
+                {forClient.map((ts) => {
+                  const projectNames = Array.from(
+                    new Set(ts.entries.map((e) => e.project?.name).filter(Boolean))
+                  )
+                  return (
+                    <label key={ts.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-gray-50 px-1 py-0.5 rounded">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(ts.id)}
+                        onChange={() => toggleTs(ts.id)}
+                      />
+                      <span>Week of {new Date(ts.weekStart).toLocaleDateString("en-GB")}</span>
+                      {projectNames.length > 0 && (
+                        <span className="text-xs text-gray-400">({projectNames.join(", ")})</span>
+                      )}
+                    </label>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -318,9 +364,45 @@ function CreateInvoiceModal({
             <p className="text-sm text-gray-400">No approved timesheets for this client.</p>
           )}
 
+          {/* Project line items breakdown */}
+          {lineItems.length > 0 && (
+            <div>
+              <label className="label">Line items</label>
+              <table className="w-full text-xs border border-gray-200 rounded overflow-hidden">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-500">
+                    <th className="text-left px-3 py-2 font-medium">Project</th>
+                    <th className="text-right px-3 py-2 font-medium">Hours</th>
+                    <th className="text-right px-3 py-2 font-medium">Rate</th>
+                    <th className="text-right px-3 py-2 font-medium">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lineItems.map((li) => (
+                    <tr key={li.projectId} className="border-t border-gray-100">
+                      <td className="px-3 py-2 text-gray-700">{li.projectName}</td>
+                      <td className="px-3 py-2 text-right text-gray-600">{li.hours.toFixed(2)}</td>
+                      <td className="px-3 py-2 text-right text-gray-600">
+                        {li.rate > 0 ? `${currency} ${li.rate.toFixed(2)}` : <span className="text-amber-500">No rate</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium text-gray-800">
+                        {li.rate > 0 ? `${currency} ${(li.hours * li.rate).toFixed(2)}` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {lineItems.some((li) => li.rate === 0) && (
+                <p className="text-xs text-amber-600 mt-1">
+                  Some projects have no rate set. Set a project rate override or client default rate, or enter the amount manually.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="label">Amount *</label>
+              <label className="label">Amount * {lineItems.length > 0 && <span className="text-xs font-normal text-gray-400">(auto-calculated)</span>}</label>
               <input
                 type="number"
                 className="input"

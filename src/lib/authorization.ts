@@ -55,26 +55,37 @@ export async function getTimesheetForUser(
       id: timesheetId,
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
     },
-    include: { entries: true, client: true },
+    include: {
+      entries: {
+        include: { project: { select: { id: true, name: true, rateOverride: true } } },
+      },
+      client: { select: { id: true, name: true, defaultRate: true } },
+    },
   })
 }
 
 /**
- * List timesheets scoped to the calling user and optionally filtered by client.
+ * List timesheets scoped to the calling user and optionally filtered by client / status / project.
  * Callers must supply their own userId — never trust the request body for this.
  */
 export async function listTimesheetsForUser(
   userId: string,
   role: Role,
-  filters?: { clientId?: string; status?: string }
+  filters?: { clientId?: string; status?: string; projectId?: string }
 ) {
   return db.timesheet.findMany({
     where: {
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
       ...(filters?.clientId ? { clientId: filters.clientId } : {}),
       ...(filters?.status ? { status: filters.status as TimesheetStatus } : {}),
+      ...(filters?.projectId ? { entries: { some: { projectId: filters.projectId } } } : {}),
     },
-    include: { client: { select: { id: true, name: true, reference: true } } },
+    include: {
+      client: { select: { id: true, name: true, reference: true, defaultRate: true } },
+      entries: {
+        include: { project: { select: { id: true, name: true, rateOverride: true } } },
+      },
+    },
     orderBy: { weekStart: "desc" },
   })
 }
@@ -183,6 +194,7 @@ export async function listInvoicesForUser(userId: string, role: Role) {
           purchaseOrderNumber: true,
           invoicePaymentTerms: true,
           invoiceCurrency: true,
+          defaultRate: true,
         },
       },
     },

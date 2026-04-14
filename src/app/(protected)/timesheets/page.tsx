@@ -10,6 +10,24 @@ interface Client {
   reference: string | null
 }
 
+interface ProjectOption {
+  id: string
+  name: string
+  clientId: string
+  active: boolean
+  rateOverride: string | null
+  client: { id: string; name: string }
+}
+
+interface TimesheetEntry {
+  id: string
+  date: string
+  hours: number | string
+  description: string
+  projectId: string | null
+  project: { id: string; name: string; rateOverride: string | null } | null
+}
+
 interface Timesheet {
   id: string
   weekStart: string
@@ -17,8 +35,8 @@ interface Timesheet {
   submittedAt: string | null
   approvedAt: string | null
   approvedBy: string | null
-  client: { id: string; name: string; reference: string | null }
-  entries?: Array<{ id: string; date: string; hours: number; description: string }>
+  client: { id: string; name: string; reference: string | null; defaultRate: string | null }
+  entries: TimesheetEntry[]
 }
 
 const STATUS_OPTIONS = ["", "DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "INVOICED"]
@@ -31,30 +49,44 @@ const statusClass: Record<string, string> = {
   INVOICED: "badge-invoiced",
 }
 
+function buildUrl(params: { status?: string; project?: string }) {
+  const p = new URLSearchParams()
+  if (params.status) p.set("status", params.status)
+  if (params.project) p.set("project", params.project)
+  return p.size > 0 ? `/timesheets?${p}` : "/timesheets"
+}
+
 function TimesheetsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const statusFilter = searchParams.get("status") ?? ""
+  const projectFilter = searchParams.get("project") ?? ""
 
   const [timesheets, setTimesheets] = useState<Timesheet[]>([])
   const [clients, setClients] = useState<Client[]>([])
+  const [projects, setProjects] = useState<ProjectOption[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [submitting, setSubmitting] = useState<string | null>(null)
   const [approvalToken, setApprovalToken] = useState<{ tsId: string; token: string } | null>(null)
 
   async function load() {
-    const qs = statusFilter ? `?status=${statusFilter}` : ""
-    const [ts, cl] = await Promise.all([
+    const params = new URLSearchParams()
+    if (statusFilter) params.set("status", statusFilter)
+    if (projectFilter) params.set("projectId", projectFilter)
+    const qs = params.size > 0 ? `?${params}` : ""
+    const [ts, cl, pr] = await Promise.all([
       fetch(`/api/timesheets${qs}`).then((r) => r.json()),
       fetch("/api/clients").then((r) => r.json()),
+      fetch("/api/projects").then((r) => r.json()),
     ])
-    setTimesheets(ts)
-    setClients(cl)
+    setTimesheets(Array.isArray(ts) ? ts : [])
+    setClients(Array.isArray(cl) ? cl : [])
+    setProjects(Array.isArray(pr) ? pr : [])
     setLoading(false)
   }
 
-  useEffect(() => { setLoading(true); load() }, [statusFilter])
+  useEffect(() => { setLoading(true); load() }, [statusFilter, projectFilter])
 
   async function submitTimesheet(id: string) {
     setSubmitting(id)
@@ -67,14 +99,12 @@ function TimesheetsContent() {
     }
   }
 
-  const filtered = timesheets.filter((ts) => !statusFilter || ts.status === statusFilter)
-
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Timesheets</h1>
-          <p className="text-sm text-gray-500 mt-1">{filtered.length} result{filtered.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-gray-500 mt-1">{timesheets.length} result{timesheets.length !== 1 ? "s" : ""}</p>
         </div>
         <button className="btn-primary" onClick={() => setShowCreate(true)}>
           New timesheet
@@ -82,11 +112,11 @@ function TimesheetsContent() {
       </div>
 
       {/* Filter bar */}
-      <div className="flex gap-2 mb-4 flex-wrap">
+      <div className="flex gap-2 mb-2 flex-wrap items-center">
         {STATUS_OPTIONS.map((s) => (
           <button
             key={s}
-            onClick={() => router.push(s ? `/timesheets?status=${s}` : "/timesheets")}
+            onClick={() => router.push(buildUrl({ status: s || undefined, project: projectFilter || undefined }))}
             className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
               statusFilter === s
                 ? "bg-blue-600 text-white border-blue-600"
@@ -97,6 +127,24 @@ function TimesheetsContent() {
           </button>
         ))}
       </div>
+
+      {projects.length > 0 && (
+        <div className="flex gap-2 mb-4 items-center">
+          <span className="text-xs text-gray-500">Project:</span>
+          <select
+            value={projectFilter}
+            onChange={(e) => router.push(buildUrl({ status: statusFilter || undefined, project: e.target.value || undefined }))}
+            className="px-3 py-1.5 rounded-full text-xs font-medium border border-gray-300 bg-white text-gray-600 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="">All projects</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.client.name} / {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Approval token callout */}
       {approvalToken && (
@@ -123,7 +171,7 @@ function TimesheetsContent() {
       <div className="card overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
-        ) : filtered.length === 0 ? (
+        ) : timesheets.length === 0 ? (
           <div className="p-8 text-center text-sm text-gray-400">No timesheets found.</div>
         ) : (
           <table className="data-table">
@@ -131,6 +179,7 @@ function TimesheetsContent() {
               <tr>
                 <th>Client</th>
                 <th>Week starting</th>
+                <th>Projects</th>
                 <th>Status</th>
                 <th>Submitted</th>
                 <th>Approved by</th>
@@ -138,32 +187,40 @@ function TimesheetsContent() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((ts) => (
-                <tr key={ts.id}>
-                  <td className="font-medium text-gray-900">{ts.client.name}</td>
-                  <td>{new Date(ts.weekStart).toLocaleDateString("en-GB")}</td>
-                  <td>
-                    <span className={`badge ${statusClass[ts.status] ?? "badge-draft"}`}>
-                      {ts.status}
-                    </span>
-                  </td>
-                  <td className="text-gray-400">
-                    {ts.submittedAt ? new Date(ts.submittedAt).toLocaleDateString("en-GB") : "—"}
-                  </td>
-                  <td className="text-gray-400 text-xs">{ts.approvedBy ?? "—"}</td>
-                  <td>
-                    {ts.status === "DRAFT" && (
-                      <button
-                        onClick={() => submitTimesheet(ts.id)}
-                        disabled={submitting === ts.id}
-                        className="text-sm text-blue-600 hover:underline disabled:opacity-50"
-                      >
-                        {submitting === ts.id ? "Submitting…" : "Submit"}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {timesheets.map((ts) => {
+                const entryProjects = Array.from(
+                  new Set(ts.entries.map((e) => e.project?.name).filter(Boolean))
+                ) as string[]
+                return (
+                  <tr key={ts.id}>
+                    <td className="font-medium text-gray-900">{ts.client.name}</td>
+                    <td>{new Date(ts.weekStart).toLocaleDateString("en-GB")}</td>
+                    <td className="text-gray-500 text-xs">
+                      {entryProjects.length > 0 ? entryProjects.join(", ") : "—"}
+                    </td>
+                    <td>
+                      <span className={`badge ${statusClass[ts.status] ?? "badge-draft"}`}>
+                        {ts.status}
+                      </span>
+                    </td>
+                    <td className="text-gray-400">
+                      {ts.submittedAt ? new Date(ts.submittedAt).toLocaleDateString("en-GB") : "—"}
+                    </td>
+                    <td className="text-gray-400 text-xs">{ts.approvedBy ?? "—"}</td>
+                    <td>
+                      {ts.status === "DRAFT" && (
+                        <button
+                          onClick={() => submitTimesheet(ts.id)}
+                          disabled={submitting === ts.id}
+                          className="text-sm text-blue-600 hover:underline disabled:opacity-50"
+                        >
+                          {submitting === ts.id ? "Submitting…" : "Submit"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -172,6 +229,7 @@ function TimesheetsContent() {
       {showCreate && (
         <CreateTimesheetModal
           clients={clients}
+          projects={projects}
           onClose={() => setShowCreate(false)}
           onSaved={() => { setShowCreate(false); load() }}
         />
@@ -182,23 +240,35 @@ function TimesheetsContent() {
 
 function CreateTimesheetModal({
   clients,
+  projects,
   onClose,
   onSaved,
 }: {
   clients: Client[]
+  projects: ProjectOption[]
   onClose: () => void
   onSaved: () => void
 }) {
   const [clientId, setClientId] = useState("")
   const [weekStart, setWeekStart] = useState("")
   const [entries, setEntries] = useState([
-    { date: "", hours: "8", description: "" },
+    { date: "", hours: "8", description: "", projectId: "" },
   ])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
+  const activeProjectsForClient = projects.filter(
+    (p) => p.clientId === clientId && p.active
+  )
+
+  function handleClientChange(id: string) {
+    setClientId(id)
+    // Reset project on each entry when client changes
+    setEntries((prev) => prev.map((e) => ({ ...e, projectId: "" })))
+  }
+
   function addEntry() {
-    if (entries.length < 7) setEntries([...entries, { date: "", hours: "8", description: "" }])
+    if (entries.length < 7) setEntries([...entries, { date: "", hours: "8", description: "", projectId: "" }])
   }
 
   function removeEntry(i: number) {
@@ -212,6 +282,10 @@ function CreateTimesheetModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!clientId) { setError("Select a client."); return }
+    if (entries.some((en) => !en.projectId)) {
+      setError("All entries must have a project selected.")
+      return
+    }
     setSaving(true)
     setError("")
 
@@ -225,6 +299,7 @@ function CreateTimesheetModal({
           date: new Date(e.date).toISOString(),
           hours: parseFloat(e.hours),
           description: e.description,
+          projectId: e.projectId,
         })),
       }),
     })
@@ -251,7 +326,7 @@ function CreateTimesheetModal({
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label">Client *</label>
-              <select className="input" required value={clientId} onChange={(e) => setClientId(e.target.value)}>
+              <select className="input" required value={clientId} onChange={(e) => handleClientChange(e.target.value)}>
                 <option value="">Select…</option>
                 {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
@@ -271,16 +346,44 @@ function CreateTimesheetModal({
                 </button>
               )}
             </div>
+
+            {clientId && activeProjectsForClient.length === 0 && (
+              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-2">
+                No active projects for this client. <a href="/projects" className="underline">Create a project</a> first.
+              </p>
+            )}
+
             <div className="space-y-2">
+              {/* Column headers */}
+              <div className="grid grid-cols-12 gap-2 px-0">
+                <span className="col-span-3 text-xs text-gray-400">Date</span>
+                <span className="col-span-2 text-xs text-gray-400">Hours</span>
+                <span className="col-span-3 text-xs text-gray-400">Project *</span>
+                <span className="col-span-3 text-xs text-gray-400">Description</span>
+              </div>
               {entries.map((entry, i) => (
                 <div key={i} className="grid grid-cols-12 gap-2 items-start">
-                  <div className="col-span-4">
+                  <div className="col-span-3">
                     <input type="date" className="input text-xs" required value={entry.date} onChange={(e) => updateEntry(i, "date", e.target.value)} />
                   </div>
                   <div className="col-span-2">
                     <input type="number" className="input text-xs" step="0.25" min="0.25" max="24" required value={entry.hours} onChange={(e) => updateEntry(i, "hours", e.target.value)} />
                   </div>
-                  <div className="col-span-5">
+                  <div className="col-span-3">
+                    <select
+                      className="input text-xs"
+                      required
+                      value={entry.projectId}
+                      onChange={(e) => updateEntry(i, "projectId", e.target.value)}
+                      disabled={!clientId}
+                    >
+                      <option value="">Select…</option>
+                      {activeProjectsForClient.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-3">
                     <input type="text" className="input text-xs" placeholder="Description" required value={entry.description} onChange={(e) => updateEntry(i, "description", e.target.value)} />
                   </div>
                   <div className="col-span-1 flex items-center pt-1">

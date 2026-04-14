@@ -20,6 +20,7 @@ const patchSchema = z.object({
         date: z.string().datetime(),
         hours: z.number().min(0.25).max(24),
         description: z.string().trim().min(1).max(500),
+        projectId: z.string().cuid("Invalid project ID"),
       })
     )
     .min(1)
@@ -109,6 +110,7 @@ export async function PATCH(
         date: new Date(e.date),
         hours: e.hours,
         description: e.description,
+        projectId: e.projectId,
       })),
     }),
     db.timesheet.update({
