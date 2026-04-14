@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, Fragment } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 
@@ -141,8 +141,8 @@ export default function AuditPage() {
             </thead>
             <tbody>
               {entries.map((e) => (
-                <>
-                  <tr key={e.id}>
+                <Fragment key={e.id}>
+                  <tr>
                     <td className="text-xs text-gray-400 font-mono whitespace-nowrap">
                       {new Date(e.createdAt).toLocaleString("en-GB")}
                     </td>
@@ -181,7 +181,7 @@ export default function AuditPage() {
                     </td>
                   </tr>
                   {expanded === e.id && (
-                    <tr key={`${e.id}-detail`} className="bg-gray-50">
+                    <tr className="bg-gray-50">
                       <td colSpan={7} className="px-4 py-2">
                         <pre className="text-xs text-gray-600 overflow-x-auto">
                           {JSON.stringify(e.metadata, null, 2)}
@@ -189,7 +189,7 @@ export default function AuditPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
