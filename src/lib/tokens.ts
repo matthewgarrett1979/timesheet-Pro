@@ -19,7 +19,7 @@ import { AuditAction } from "@prisma/client"
 import { audit } from "./audit"
 
 const ISSUER = "timesheet-pro"
-const EXPIRY = "7d"
+const EXPIRY = "30d"
 
 function getSigningKey(): Uint8Array {
   return new TextEncoder().encode(env.APPROVAL_SIGNING_SECRET)
@@ -43,7 +43,7 @@ export async function createApprovalToken(
   params: CreateTokenParams
 ): Promise<string> {
   const jti = randomUUID()
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
 
   const token = await new SignJWT({
     cid: params.clientId,

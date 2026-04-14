@@ -22,6 +22,7 @@ import { checkRateLimit } from "@/lib/rate-limit"
 import { AuditAction, Role } from "@prisma/client"
 import { z } from "zod"
 import { db } from "@/lib/db"
+import { checkBudgetAlert } from "@/lib/budget-alert"
 
 const createSchema = z.object({
   date:        z.string().datetime({ message: "date must be ISO-8601" }),
@@ -132,6 +133,11 @@ export async function POST(req: NextRequest) {
     userAgent:  req.headers.get("user-agent") ?? undefined,
     success:    true,
   })
+
+  // Fire-and-forget budget alert check (never blocks response)
+  if (body.projectId) {
+    checkBudgetAlert(body.projectId).catch(() => {})
+  }
 
   return NextResponse.json(entry, { status: 201 })
 }

@@ -20,6 +20,7 @@ enum TimesheetStatus {
   DRAFT
   SUBMITTED
   APPROVED
+  PARTIALLY_APPROVED
   REJECTED
   INVOICED
 }
@@ -97,6 +98,11 @@ enum AuditAction {
   ADMIN_ACTION
   UNAUTHORISED_ACCESS
   SETTINGS_CHANGED
+  FORCE_APPROVED
+  FORCE_REJECTED
+  RESET_TO_DRAFT
+  PARTIALLY_APPROVED
+  RESEND_EMAIL
 }
 
 // ---------------------------------------------------------------------------
@@ -260,9 +266,10 @@ model Timesheet {
   status       TimesheetStatus      @default(DRAFT)
   rejectionNote String?
 
-  submittedAt DateTime?
-  approvedAt  DateTime?
-  approvedBy  String?   // email of the client-side approver
+  submittedAt    DateTime?
+  approvedAt     DateTime?
+  approvedBy     String?   // email of the client-side approver
+  reminderCount  Int       @default(0)
 
   invoiceId   String?
 
@@ -377,6 +384,13 @@ model AppSettings {
   fontFamily      String   @default("inter")     // inter | system | georgia | mono
   navStyle        String   @default("sidebar")   // sidebar | topbar
   compactMode     Boolean  @default(false)
+
+  // Notification / reminder settings
+  notificationsEnabled Boolean @default(false)
+  reminderThreshold    Int     @default(35)     // minimum hours threshold
+  reminderDayOfWeek    Int     @default(5)      // 1=Mon … 7=Sun (ISO weekday)
+  reminderTime         String  @default("17:00") // HH:MM UTC
+
   updatedAt       DateTime @updatedAt
 }
 

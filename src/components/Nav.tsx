@@ -3,36 +3,56 @@
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { signOut } from "next-auth/react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 
-interface NavUser {
-  id: string
-  name?: string | null
-  email?: string | null
-  role: string
-}
+interface NavUser { id: string; name?: string | null; email?: string | null; role: string }
 
 const NAV_ITEMS = [
-  { href: "/dashboard",  label: "Dashboard" },
-  { href: "/timesheets", label: "Timesheets" },
-  { href: "/clients",    label: "Clients" },
-  { href: "/projects",   label: "Projects" },
-  { href: "/expenses",   label: "Expenses" },
-  { href: "/invoices",   label: "Invoices" },
-  { href: "/approvals",  label: "Approvals" },
+  { href: "/dashboard",    label: "Dashboard" },
+  { href: "/time-entries", label: "Time Entries" },
+  { href: "/timesheets",   label: "Timesheets" },
+  { href: "/clients",      label: "Clients" },
+  { href: "/projects",     label: "Projects" },
+  { href: "/expenses",     label: "Expenses" },
+  { href: "/invoices",     label: "Invoices" },
+  { href: "/approvals",    label: "Approvals" },
+  { href: "/reports",      label: "Reports", adminOnly: true },
 ]
 
 const SETTINGS_ITEMS = [
-  { href: "/settings",             label: "Profile & Security", roles: ["ADMIN", "MANAGER"] },
-  { href: "/settings/appearance",  label: "Appearance",         roles: ["ADMIN", "MANAGER"] },
-  { href: "/settings/users",       label: "Users",              roles: ["ADMIN"] },
-  { href: "/settings/audit",       label: "Audit Log",          roles: ["ADMIN"] },
+  { href: "/settings",                    label: "Profile & Security",  roles: ["ADMIN", "MANAGER"] },
+  { href: "/settings/appearance",         label: "Appearance",          roles: ["ADMIN", "MANAGER"] },
+  { href: "/settings/categories",         label: "Time Categories",     roles: ["ADMIN"] },
+  { href: "/settings/notifications",      label: "Notifications",       roles: ["ADMIN"] },
+  { href: "/settings/users",              label: "Users",               roles: ["ADMIN"] },
+  { href: "/settings/audit",              label: "Audit Log",           roles: ["ADMIN"] },
 ]
 
 export default function Nav({ user, version }: { user: NavUser; version: string }) {
   const pathname = usePathname()
   const router = useRouter()
   const [signingOut, setSigningOut] = useState(false)
+  const [timerRunning, setTimerRunning] = useState(false)
+
+  useEffect(() => {
+    function checkTimer() {
+      try {
+        const raw = localStorage.getItem("timer_state")
+        if (raw) {
+          const state = JSON.parse(raw)
+          setTimerRunning(!!(state && state.startTime))
+        } else {
+          setTimerRunning(false)
+        }
+      } catch {
+        setTimerRunning(false)
+      }
+    }
+
+    checkTimer()
+    const interval = setInterval(checkTimer, 5000)
+    return () => clearInterval(interval)
+  }, [])
 
   async function handleSignOut() {
     setSigningOut(true)
@@ -44,6 +64,11 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
     if (href === "/dashboard") return pathname === href
     return pathname.startsWith(href)
   }
+
+  const visibleNavItems = NAV_ITEMS.filter((item) => {
+    if (item.adminOnly) return user.role === "ADMIN"
+    return true
+  })
 
   return (
     <aside
@@ -57,7 +82,7 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
 
       {/* Main nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map((item) => (
+        {visibleNavItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
@@ -68,7 +93,10 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
             }`}
             style={isActive(item.href) ? { backgroundColor: "var(--color-accent, #2563eb)" } : undefined}
           >
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {item.href === "/time-entries" && timerRunning && (
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-auto" />
+            )}
           </Link>
         ))}
 
