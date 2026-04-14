@@ -29,6 +29,7 @@ const createSchema = z.object({
   contactEmail: z.string().trim().email().nullish(),
   contactPhone: z.string().trim().max(50).nullish(),
   // Invoice Settings
+  defaultRate: z.number().positive().nullish(),
   vatNumber: z.string().trim().max(50).nullish(),
   purchaseOrderNumber: z.string().trim().max(100).nullish(),
   invoicePaymentTerms: z.number().int().positive().nullish(),
@@ -96,6 +97,7 @@ export async function POST(req: NextRequest) {
       contactName: body.contactName,
       contactEmail: body.contactEmail,
       contactPhone: body.contactPhone,
+      defaultRate: body.defaultRate,
       vatNumber: body.vatNumber,
       purchaseOrderNumber: body.purchaseOrderNumber,
       invoicePaymentTerms: body.invoicePaymentTerms,

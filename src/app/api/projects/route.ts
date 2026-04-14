@@ -16,6 +16,13 @@ const createSchema = z.object({
   name: z.string().trim().min(1).max(200),
   description: z.string().trim().max(1000).optional(),
   clientId: z.string().cuid("Invalid client ID"),
+  // Billing
+  billingType:      z.enum(["TM", "DRAWDOWN", "FIXED"]).optional(),
+  rateOverride:     z.number().positive().nullish(),
+  drawdownRate:     z.number().positive().nullish(),
+  budgetHours:      z.number().positive().nullish(),
+  contingencyHours: z.number().positive().nullish(),
+  budgetValue:      z.number().positive().nullish(),
 })
 
 export async function GET(req: NextRequest) {
@@ -72,6 +79,12 @@ export async function POST(req: NextRequest) {
       description: body.description,
       clientId: body.clientId,
       managerId: session.user.id,
+      billingType:      body.billingType,
+      rateOverride:     body.rateOverride,
+      drawdownRate:     body.drawdownRate,
+      budgetHours:      body.budgetHours,
+      contingencyHours: body.contingencyHours,
+      budgetValue:      body.budgetValue,
     },
     include: { client: { select: { id: true, name: true } } },
   })
