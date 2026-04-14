@@ -116,14 +116,23 @@ ALTER TABLE "Timesheet" ADD COLUMN IF NOT EXISTS "granularity"   "TimesheetGranu
 ALTER TABLE "Timesheet" ADD COLUMN IF NOT EXISTS "rejectionNote" TEXT;
 
 -- Backfill period columns from weekStart (weekly = Mon to Sun)
-UPDATE "Timesheet"
-SET
-  "periodStart" = "weekStart"::DATE,
-  "periodEnd"   = ("weekStart"::DATE + INTERVAL '6 days')::DATE
-WHERE "periodStart" IS NULL AND "weekStart" IS NOT NULL;
+-- Guard: only runs if weekStart column still exists (idempotent — safe if already dropped)
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name   = 'Timesheet'
+      AND column_name  = 'weekStart'
+  ) THEN
+    UPDATE "Timesheet"
+    SET
+      "periodStart" = "weekStart"::DATE,
+      "periodEnd"   = ("weekStart"::DATE + INTERVAL '6 days')::DATE
+    WHERE "periodStart" IS NULL AND "weekStart" IS NOT NULL;
 
--- Drop the old weekStart column
-ALTER TABLE "Timesheet" DROP COLUMN IF EXISTS "weekStart";
+    ALTER TABLE "Timesheet" DROP COLUMN "weekStart";
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- 7. TimeEntry — create table, migrate data from TimesheetEntry, drop old table
@@ -150,34 +159,42 @@ CREATE TABLE IF NOT EXISTS "TimeEntry" (
 );
 
 -- Migrate existing TimesheetEntry rows → TimeEntry
--- clientId and managerId are backfilled from the parent Timesheet
-INSERT INTO "TimeEntry" (
-  "id", "date", "clientId", "projectId", "managerId", "timesheetId",
-  "hours", "description", "isBillable", "status", "invoiced",
-  "receiptPath", "createdAt", "updatedAt"
-)
-SELECT
-  te."id",
-  te."date",
-  ts."clientId",
-  te."projectId",
-  ts."managerId",
-  te."timesheetId",
-  te."hours",
-  te."description",
-  true,
-  CASE ts."status"
-    WHEN 'APPROVED'  THEN 'APPROVED' ::"TimeEntryStatus"
-    WHEN 'SUBMITTED' THEN 'SUBMITTED'::"TimeEntryStatus"
-    ELSE                  'DRAFT'    ::"TimeEntryStatus"
-  END,
-  false,
-  te."receiptPath",
-  te."createdAt",
-  te."updatedAt"
-FROM "TimesheetEntry" te
-LEFT JOIN "Timesheet" ts ON te."timesheetId" = ts."id"
-ON CONFLICT ("id") DO NOTHING;
+-- Guard: only runs if TimesheetEntry table still exists (idempotent — safe if already dropped)
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name   = 'TimesheetEntry'
+  ) THEN
+    INSERT INTO "TimeEntry" (
+      "id", "date", "clientId", "projectId", "managerId", "timesheetId",
+      "hours", "description", "isBillable", "status", "invoiced",
+      "receiptPath", "createdAt", "updatedAt"
+    )
+    SELECT
+      te."id",
+      te."date",
+      ts."clientId",
+      te."projectId",
+      ts."managerId",
+      te."timesheetId",
+      te."hours",
+      te."description",
+      true,
+      CASE ts."status"
+        WHEN 'APPROVED'  THEN 'APPROVED' ::"TimeEntryStatus"
+        WHEN 'SUBMITTED' THEN 'SUBMITTED'::"TimeEntryStatus"
+        ELSE                  'DRAFT'    ::"TimeEntryStatus"
+      END,
+      false,
+      te."receiptPath",
+      te."createdAt",
+      te."updatedAt"
+    FROM "TimesheetEntry" te
+    LEFT JOIN "Timesheet" ts ON te."timesheetId" = ts."id"
+    ON CONFLICT ("id") DO NOTHING;
+  END IF;
+END $$;
 
 -- Foreign key constraints on TimeEntry
 DO $$ BEGIN
