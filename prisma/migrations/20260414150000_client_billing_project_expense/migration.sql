@@ -1,4 +1,5 @@
 -- AlterEnum: Add AuditAction values added to schema after initial migration
+-- IF NOT EXISTS prevents errors if a previous prisma db push already added them
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'USER_CREATED';
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'USER_UPDATED';
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'PROJECT_CREATED';
@@ -6,11 +7,14 @@ ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'PROJECT_UPDATED';
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'EXPENSE_CREATED';
 ALTER TYPE "AuditAction" ADD VALUE IF NOT EXISTS 'EXPENSE_UPDATED';
 
--- CreateEnum: ExpenseStatus
-CREATE TYPE "ExpenseStatus" AS ENUM ('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED');
+-- CreateEnum: ExpenseStatus (safe if already exists from a prior db push)
+DO $$ BEGIN
+  CREATE TYPE "ExpenseStatus" AS ENUM ('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED');
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
--- CreateTable: Project
-CREATE TABLE "Project" (
+-- CreateTable: Project (safe if already exists)
+CREATE TABLE IF NOT EXISTS "Project" (
     "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "description" TEXT,
@@ -23,8 +27,8 @@ CREATE TABLE "Project" (
     CONSTRAINT "Project_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable: Expense
-CREATE TABLE "Expense" (
+-- CreateTable: Expense (safe if already exists)
+CREATE TABLE IF NOT EXISTS "Expense" (
     "id" TEXT NOT NULL,
     "description" TEXT NOT NULL,
     "amount" DECIMAL(10,2) NOT NULL,
@@ -42,35 +46,54 @@ CREATE TABLE "Expense" (
 );
 
 -- AlterTable: Add UK B2B invoice billing fields to Client
-ALTER TABLE "Client" ADD COLUMN "companyName"         TEXT;
-ALTER TABLE "Client" ADD COLUMN "tradingName"         TEXT;
-ALTER TABLE "Client" ADD COLUMN "addressLine1"        TEXT;
-ALTER TABLE "Client" ADD COLUMN "addressLine2"        TEXT;
-ALTER TABLE "Client" ADD COLUMN "city"                TEXT;
-ALTER TABLE "Client" ADD COLUMN "county"              TEXT;
-ALTER TABLE "Client" ADD COLUMN "postcode"            TEXT;
-ALTER TABLE "Client" ADD COLUMN "country"             TEXT NOT NULL DEFAULT 'United Kingdom';
-ALTER TABLE "Client" ADD COLUMN "vatNumber"           TEXT;
-ALTER TABLE "Client" ADD COLUMN "contactName"         TEXT;
-ALTER TABLE "Client" ADD COLUMN "contactEmail"        TEXT;
-ALTER TABLE "Client" ADD COLUMN "contactPhone"        TEXT;
-ALTER TABLE "Client" ADD COLUMN "purchaseOrderNumber" TEXT;
-ALTER TABLE "Client" ADD COLUMN "invoicePaymentTerms" INTEGER;
-ALTER TABLE "Client" ADD COLUMN "invoiceCurrency"     TEXT NOT NULL DEFAULT 'GBP';
-ALTER TABLE "Client" ADD COLUMN "notes"               TEXT;
+-- ADD COLUMN IF NOT EXISTS is safe to re-run
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "companyName"         TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "tradingName"         TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "addressLine1"        TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "addressLine2"        TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "city"                TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "county"              TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "postcode"            TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "country"             TEXT NOT NULL DEFAULT 'United Kingdom';
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "vatNumber"           TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "contactName"         TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "contactEmail"        TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "contactPhone"        TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "purchaseOrderNumber" TEXT;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "invoicePaymentTerms" INTEGER;
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "invoiceCurrency"     TEXT NOT NULL DEFAULT 'GBP';
+ALTER TABLE "Client" ADD COLUMN IF NOT EXISTS "notes"               TEXT;
 
--- CreateIndex: Project
-CREATE INDEX "Project_managerId_idx" ON "Project"("managerId");
-CREATE INDEX "Project_clientId_idx" ON "Project"("clientId");
+-- CreateIndex: Project (safe to re-run)
+CREATE INDEX IF NOT EXISTS "Project_managerId_idx" ON "Project"("managerId");
+CREATE INDEX IF NOT EXISTS "Project_clientId_idx" ON "Project"("clientId");
 
--- CreateIndex: Expense
-CREATE INDEX "Expense_managerId_idx" ON "Expense"("managerId");
-CREATE INDEX "Expense_clientId_idx" ON "Expense"("clientId");
+-- CreateIndex: Expense (safe to re-run)
+CREATE INDEX IF NOT EXISTS "Expense_managerId_idx" ON "Expense"("managerId");
+CREATE INDEX IF NOT EXISTS "Expense_clientId_idx" ON "Expense"("clientId");
 
--- AddForeignKey: Project
-ALTER TABLE "Project" ADD CONSTRAINT "Project_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "Project" ADD CONSTRAINT "Project_managerId_fkey" FOREIGN KEY ("managerId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+-- AddForeignKey: Project (DO block avoids error if constraint already exists)
+DO $$ BEGIN
+  ALTER TABLE "Project" ADD CONSTRAINT "Project_clientId_fkey"
+    FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "Project" ADD CONSTRAINT "Project_managerId_fkey"
+    FOREIGN KEY ("managerId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
 
 -- AddForeignKey: Expense
-ALTER TABLE "Expense" ADD CONSTRAINT "Expense_managerId_fkey" FOREIGN KEY ("managerId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-ALTER TABLE "Expense" ADD CONSTRAINT "Expense_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+DO $$ BEGIN
+  ALTER TABLE "Expense" ADD CONSTRAINT "Expense_managerId_fkey"
+    FOREIGN KEY ("managerId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+  ALTER TABLE "Expense" ADD CONSTRAINT "Expense_clientId_fkey"
+    FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+EXCEPTION WHEN duplicate_object THEN null;
+END $$;
