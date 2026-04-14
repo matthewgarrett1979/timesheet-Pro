@@ -35,7 +35,11 @@ export async function audit(params: AuditParams): Promise<void> {
         action: params.action,
         resource: params.resource,
         resourceId: params.resourceId ?? null,
-        metadata: params.metadata,
+        // JSON.parse(stringify) serialises Dates → ISO strings and strips
+        // any non-JSON-safe values, satisfying Prisma's InputJsonValue type.
+        metadata: params.metadata != null
+          ? (JSON.parse(JSON.stringify(params.metadata)) as never)
+          : undefined,
         ipAddress: params.ipAddress ?? null,
         userAgent: truncate(params.userAgent, 512) ?? null,
         success: params.success,
