@@ -6,7 +6,7 @@ import type { FontFamily, NavStyle } from "@/lib/app-settings"
 import { FONT_STACKS } from "@/lib/app-settings"
 
 const DEFAULT = {
-  primaryColor: "#1e293b",
+  primaryColor: "#1e3a5f",
   accentColor: "#2563eb",
   backgroundColor: "#f9fafb",
   fontFamily: "inter" as FontFamily,
@@ -147,6 +147,7 @@ export default function AppearancePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [showResetConfirm, setShowResetConfirm] = useState(false)
 
   useEffect(() => {
     fetch("/api/settings/appearance")
@@ -185,10 +186,31 @@ export default function AppearancePage() {
     setSaving(false)
 
     if (res.ok) {
-      setMsg({ ok: true, text: "Appearance saved. Reload any open page to apply the new theme." })
+      setMsg({ ok: true, text: "Appearance saved. Reload the page to see your changes." })
     } else {
       const data = await res.json()
       setMsg({ ok: false, text: data.error ?? "Failed to save." })
+    }
+  }
+
+  async function handleRestore() {
+    setShowResetConfirm(false)
+    setSaving(true)
+    setMsg(null)
+
+    const res = await fetch("/api/settings/appearance", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(DEFAULT),
+    })
+
+    setSaving(false)
+    if (res.ok) {
+      setSettings(DEFAULT)
+      setMsg({ ok: true, text: "Defaults restored. Reload the page to see your changes." })
+    } else {
+      const data = await res.json()
+      setMsg({ ok: false, text: data.error ?? "Failed to restore defaults." })
     }
   }
 
@@ -328,18 +350,63 @@ export default function AppearancePage() {
           )}
 
           {isAdmin ? (
-            <button
-              type="submit"
-              form="appearance-form"
-              disabled={saving}
-              className="btn-primary"
-            >
-              {saving ? "Saving…" : "Save appearance"}
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                type="submit"
+                form="appearance-form"
+                disabled={saving}
+                className="btn-primary"
+              >
+                {saving ? "Saving…" : "Save appearance"}
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setShowResetConfirm(true)}
+                className="btn-secondary text-sm"
+              >
+                Restore defaults
+              </button>
+            </div>
           ) : (
             <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
               Only administrators can change appearance settings.
             </p>
+          )}
+
+          {/* Restore defaults confirmation dialog */}
+          {showResetConfirm && (
+            <div
+              className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+              onClick={() => setShowResetConfirm(false)}
+            >
+              <div
+                className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Restore defaults?</h3>
+                <p className="text-sm text-gray-600 mb-1">This will reset all appearance settings to:</p>
+                <ul className="text-sm text-gray-500 list-disc list-inside mb-4 space-y-0.5">
+                  <li>Primary colour: <span className="font-mono">#1e3a5f</span> (dark navy)</li>
+                  <li>Accent colour: <span className="font-mono">#2563eb</span> (blue)</li>
+                  <li>Background: <span className="font-mono">#f9fafb</span> (light grey)</li>
+                  <li>Font: Inter</li>
+                  <li>Nav: Sidebar</li>
+                  <li>Compact mode: off</li>
+                </ul>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setShowResetConfirm(false)}
+                    className="btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button onClick={handleRestore} className="btn-primary">
+                    Restore defaults
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
 

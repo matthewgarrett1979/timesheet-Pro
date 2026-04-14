@@ -3,13 +3,14 @@
 @tailwind utilities;
 
 /* Custom CSS variables used throughout the app.
-   Theme values are overridden at runtime by (protected)/layout.tsx
-   via a server-rendered <style> tag. */
+   Theme values are overridden per-request via style="" on <html> in layout.tsx
+   (fetched from AppSettings in DB). Style attributes are not subject to CSP
+   style-src restrictions, unlike <style> tags which require a nonce. */
 @layer base {
   :root {
     --sidebar-width: 240px;
-    /* Theme defaults — overridden per-request from AppSettings */
-    --color-nav-bg:   #1e293b;  /* slate-900  — sidebar background  */
+    /* Theme defaults — overridden per-request from AppSettings (set on <html> in layout.tsx) */
+    --color-nav-bg:   #1e3a5f;  /* dark navy  — sidebar background  */
     --color-accent:   #2563eb;  /* blue-600   — active items/buttons */
     --color-page-bg:  #f9fafb;  /* gray-50    — page background      */
     --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
@@ -23,8 +24,7 @@
 
   /* Focus ring for accessibility */
   :focus-visible {
-    outline: 2px solid var(--color-accent, #3b82f6);
-    outline-offset: 2px;
+    @apply outline-2 outline-offset-2 outline-blue-500;
   }
 }
 
@@ -72,17 +72,8 @@
     @apply btn text-white;
     background-color: var(--color-accent, #2563eb);
   }
-  .btn-primary:hover {
-    background-color: var(--color-accent, #2563eb);
-    filter: brightness(0.88);
-  }
-  .btn-primary:active {
-    filter: brightness(0.76);
-  }
-  .btn-primary:disabled {
-    opacity: 0.6;
-    filter: none;
-  }
+  .btn-primary:hover  { filter: brightness(0.88); }
+  .btn-primary:active { filter: brightness(0.78); }
   .btn-secondary {
     @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50;
   }
@@ -94,12 +85,8 @@
   .input {
     @apply block w-full rounded-md border border-gray-300 px-3 py-2 text-sm
            placeholder-gray-400 shadow-sm
+           focus:border-blue-500 focus:ring-1 focus:ring-blue-500
            disabled:bg-gray-50 disabled:text-gray-500;
-    outline: none;
-  }
-  .input:focus {
-    border-color: var(--color-accent, #2563eb);
-    box-shadow: 0 0 0 1px var(--color-accent, #2563eb);
   }
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1;

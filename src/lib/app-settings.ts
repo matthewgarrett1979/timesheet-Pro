@@ -13,7 +13,7 @@ export interface AppTheme {
 }
 
 export const DEFAULT_THEME: AppTheme = {
-  primaryColor: "#1e293b",
+  primaryColor: "#1e3a5f",
   accentColor: "#2563eb",
   backgroundColor: "#f9fafb",
   fontFamily: "inter",

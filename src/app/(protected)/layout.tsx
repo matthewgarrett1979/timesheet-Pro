@@ -19,12 +19,10 @@ export default async function ProtectedLayout({
     redirect("/mfa")
   }
 
-  // Theme CSS custom properties are injected on <html> by the root layout —
-  // they cascade to all elements here automatically.
   return (
     <div
       className="flex h-screen overflow-hidden"
-      style={{ backgroundColor: "var(--color-page-bg, #f9fafb)" }}
+      style={{ fontFamily: "var(--font-body)", backgroundColor: "var(--color-page-bg, #f9fafb)" }}
     >
       <Nav
         user={{
@@ -35,7 +33,10 @@ export default async function ProtectedLayout({
         }}
         version={APP_VERSION}
       />
-      <main className="flex-1 overflow-y-auto" style={{ backgroundColor: "var(--color-page-bg, #f9fafb)" }}>
+      <main
+        className="flex-1 overflow-y-auto"
+        style={{ backgroundColor: "var(--color-page-bg, #f9fafb)" }}
+      >
         {children}
       </main>
     </div>
