@@ -46,7 +46,7 @@ function LoginForm() {
       <div className="w-full max-w-sm">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-gray-900">Timesheet Pro</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Tech Timesheet</h1>
           <p className="mt-1 text-sm text-gray-500">Sign in to your account</p>
         </div>
 

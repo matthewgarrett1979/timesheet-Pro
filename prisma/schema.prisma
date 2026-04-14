@@ -264,6 +264,18 @@ model Invoice {
   @@index([clientId])
 }
 
+// Global appearance / theme settings — singleton row with id = 'global'
+model AppSettings {
+  id              String   @id @default("global")
+  primaryColor    String   @default("#1e293b")   // sidebar / nav background
+  accentColor     String   @default("#2563eb")   // active items, buttons
+  backgroundColor String   @default("#f9fafb")   // page background
+  fontFamily      String   @default("inter")     // inter | system | georgia | mono
+  navStyle        String   @default("sidebar")   // sidebar | topbar
+  compactMode     Boolean  @default(false)
+  updatedAt       DateTime @updatedAt
+}
+
 // Immutable audit log — rows are never updated or deleted by the application
 model AuditLog {
   id         String      @id @default(cuid())

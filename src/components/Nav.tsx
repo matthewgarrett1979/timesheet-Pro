@@ -23,12 +23,13 @@ const NAV_ITEMS = [
 ]
 
 const SETTINGS_ITEMS = [
-  { href: "/settings",        label: "Profile & Security", roles: ["ADMIN", "MANAGER"] },
-  { href: "/settings/users",  label: "Users",              roles: ["ADMIN"] },
-  { href: "/settings/audit",  label: "Audit Log",          roles: ["ADMIN"] },
+  { href: "/settings",             label: "Profile & Security", roles: ["ADMIN", "MANAGER"] },
+  { href: "/settings/appearance",  label: "Appearance",         roles: ["ADMIN", "MANAGER"] },
+  { href: "/settings/users",       label: "Users",              roles: ["ADMIN"] },
+  { href: "/settings/audit",       label: "Audit Log",          roles: ["ADMIN"] },
 ]
 
-export default function Nav({ user }: { user: NavUser }) {
+export default function Nav({ user, version }: { user: NavUser; version: string }) {
   const pathname = usePathname()
   const router = useRouter()
   const [signingOut, setSigningOut] = useState(false)
@@ -45,10 +46,13 @@ export default function Nav({ user }: { user: NavUser }) {
   }
 
   return (
-    <aside className="flex flex-col w-60 min-h-screen bg-slate-900 text-slate-200 shrink-0">
+    <aside
+      className="flex flex-col w-60 min-h-screen text-slate-200 shrink-0"
+      style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
+    >
       {/* Logo */}
-      <div className="px-5 py-5 border-b border-slate-700">
-        <span className="text-lg font-bold text-white tracking-tight">Timesheet Pro</span>
+      <div className="px-5 py-5 border-b border-white/10">
+        <span className="text-lg font-bold text-white tracking-tight">Tech Timesheet</span>
       </div>
 
       {/* Main nav */}
@@ -59,9 +63,10 @@ export default function Nav({ user }: { user: NavUser }) {
             href={item.href}
             className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
               isActive(item.href)
-                ? "bg-blue-600 text-white"
-                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                ? "text-white"
+                : "text-slate-300 hover:bg-white/10 hover:text-white"
             }`}
+            style={isActive(item.href) ? { backgroundColor: "var(--color-accent, #2563eb)" } : undefined}
           >
             {item.label}
           </Link>
@@ -78,9 +83,10 @@ export default function Nav({ user }: { user: NavUser }) {
               href={item.href}
               className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
                 isActive(item.href)
-                  ? "bg-blue-600 text-white"
-                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  ? "text-white"
+                  : "text-slate-300 hover:bg-white/10 hover:text-white"
               }`}
+              style={isActive(item.href) ? { backgroundColor: "var(--color-accent, #2563eb)" } : undefined}
             >
               {item.label}
             </Link>
@@ -89,7 +95,7 @@ export default function Nav({ user }: { user: NavUser }) {
       </nav>
 
       {/* User footer */}
-      <div className="px-4 py-4 border-t border-slate-700">
+      <div className="px-4 py-4 border-t border-white/10">
         <div className="mb-2">
           <p className="text-sm font-medium text-white truncate">{user.name}</p>
           <p className="text-xs text-slate-400 truncate">{user.email}</p>
@@ -104,6 +110,7 @@ export default function Nav({ user }: { user: NavUser }) {
         >
           {signingOut ? "Signing out…" : "Sign out"}
         </button>
+        <p className="text-xs text-slate-600 mt-2 select-none">v{version}</p>
       </div>
     </aside>
   )
