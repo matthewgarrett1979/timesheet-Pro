@@ -97,6 +97,66 @@ export async function assertClientOwnership(
 }
 
 // ---------------------------------------------------------------------------
+// Project authorisation
+// ---------------------------------------------------------------------------
+
+export async function getProjectForUser(projectId: string, userId: string, role: Role) {
+  return db.project.findFirst({
+    where: {
+      id: projectId,
+      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+    },
+    include: { client: { select: { id: true, name: true } } },
+  })
+}
+
+export async function listProjectsForUser(
+  userId: string,
+  role: Role,
+  filters?: { clientId?: string; active?: boolean }
+) {
+  return db.project.findMany({
+    where: {
+      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+      ...(filters?.clientId ? { clientId: filters.clientId } : {}),
+      ...(filters?.active !== undefined ? { active: filters.active } : {}),
+    },
+    include: { client: { select: { id: true, name: true } } },
+    orderBy: { createdAt: "desc" },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Expense authorisation
+// ---------------------------------------------------------------------------
+
+export async function getExpenseForUser(expenseId: string, userId: string, role: Role) {
+  return db.expense.findFirst({
+    where: {
+      id: expenseId,
+      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+    },
+    include: { client: { select: { id: true, name: true } } },
+  })
+}
+
+export async function listExpensesForUser(
+  userId: string,
+  role: Role,
+  filters?: { clientId?: string; status?: string }
+) {
+  return db.expense.findMany({
+    where: {
+      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+      ...(filters?.clientId ? { clientId: filters.clientId } : {}),
+      ...(filters?.status ? { status: filters.status as never } : {}),
+    },
+    include: { client: { select: { id: true, name: true } } },
+    orderBy: { date: "desc" },
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Invoice authorisation
 // ---------------------------------------------------------------------------
 

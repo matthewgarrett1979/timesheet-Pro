@@ -1,5 +1,7 @@
 import type { Metadata } from "next"
 import { headers } from "next/headers"
+import "./globals.css"
+import Providers from "@/components/Providers"
 
 export const metadata: Metadata = {
   title: "Timesheet Pro",
@@ -23,7 +25,7 @@ export default async function RootLayout({
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body>
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   )

@@ -1,0 +1,92 @@
+/**
+ * GET   /api/projects/[id]  — fetch a project (ownership enforced)
+ * PATCH /api/projects/[id]  — update a project (ownership enforced)
+ */
+import { NextRequest, NextResponse } from "next/server"
+import { getServerSession } from "next-auth"
+import { authOptions } from "@/lib/auth"
+import { db } from "@/lib/db"
+import { getProjectForUser } from "@/lib/authorization"
+import { audit, getClientIp } from "@/lib/audit"
+import { checkRateLimit } from "@/lib/rate-limit"
+import { AuditAction, Role } from "@prisma/client"
+import { z } from "zod"
+
+const updateSchema = z.object({
+  name: z.string().trim().min(1).max(200).optional(),
+  description: z.string().trim().max(1000).optional(),
+  active: z.boolean().optional(),
+})
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+
+  const project = await getProjectForUser(id, session.user.id, session.user.role as Role)
+  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  return NextResponse.json(project)
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+
+  const existing = await getProjectForUser(id, session.user.id, session.user.role as Role)
+  if (!existing) {
+    await audit({
+      userId: session.user.id,
+      action: AuditAction.UNAUTHORISED_ACCESS,
+      resource: "project",
+      resourceId: id,
+      metadata: { action: "update" },
+      ipAddress: getClientIp(req),
+      success: false,
+    })
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
+  let body: z.infer<typeof updateSchema>
+  try {
+    body = updateSchema.parse(await req.json())
+  } catch {
+    return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
+  }
+
+  const updated = await db.project.update({
+    where: { id },
+    data: body,
+    include: { client: { select: { id: true, name: true } } },
+  })
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.PROJECT_UPDATED,
+    resource: "project",
+    resourceId: id,
+    metadata: { changes: body },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return NextResponse.json(updated)
+}

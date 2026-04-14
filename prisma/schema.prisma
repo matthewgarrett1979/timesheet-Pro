@@ -30,11 +30,20 @@ enum InvoiceStatus {
   PAID
 }
 
+enum ExpenseStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
 enum AuditAction {
   USER_LOGIN
   USER_LOGIN_FAILED
   USER_LOGOUT
   USER_LOCKED
+  USER_CREATED
+  USER_UPDATED
   MFA_SETUP
   MFA_VERIFIED
   MFA_FAILED
@@ -49,6 +58,10 @@ enum AuditAction {
   INVOICE_SENT
   CLIENT_CREATED
   CLIENT_UPDATED
+  PROJECT_CREATED
+  PROJECT_UPDATED
+  EXPENSE_CREATED
+  EXPENSE_UPDATED
   APPROVAL_TOKEN_CREATED
   APPROVAL_TOKEN_USED
   APPROVAL_TOKEN_EXPIRED
@@ -84,6 +97,8 @@ model User {
   // Relations
   clients        Client[]
   timesheets     Timesheet[]
+  projects       Project[]
+  expenses       Expense[]
   auditLogs      AuditLog[]
   approvalTokens ApprovalToken[]
 
@@ -100,12 +115,31 @@ model Client {
   manager   User     @relation(fields: [managerId], references: [id])
 
   timesheets Timesheet[]
+  projects   Project[]
+  expenses   Expense[]
   invoices   Invoice[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([managerId])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  managerId   String
+  manager     User     @relation(fields: [managerId], references: [id])
+  active      Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([managerId])
+  @@index([clientId])
 }
 
 model Timesheet {
@@ -147,6 +181,27 @@ model TimesheetEntry {
   updatedAt DateTime @updatedAt
 
   @@index([timesheetId])
+}
+
+model Expense {
+  id          String        @id @default(cuid())
+  description String
+  amount      Decimal       @db.Decimal(10, 2)
+  currency    String        @default("GBP")
+  date        DateTime      @db.Date
+  category    String
+  receiptPath String?
+  managerId   String
+  manager     User          @relation(fields: [managerId], references: [id])
+  clientId    String?
+  client      Client?       @relation(fields: [clientId], references: [id])
+  status      ExpenseStatus @default(DRAFT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([managerId])
+  @@index([clientId])
 }
 
 // Single-use HMAC-signed JWT approval tokens sent to clients
