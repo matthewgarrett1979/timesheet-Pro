@@ -24,6 +24,7 @@ interface Client {
   contactEmail: string | null
   contactPhone: string | null
   // Invoice
+  defaultRate: number | null
   purchaseOrderNumber: string | null
   invoicePaymentTerms: number | null
   invoiceCurrency: string
@@ -51,6 +52,7 @@ interface FormState {
   contactName: string
   contactEmail: string
   contactPhone: string
+  defaultRate: string
   vatNumber: string
   purchaseOrderNumber: string
   invoicePaymentTerms: string
@@ -75,6 +77,7 @@ function emptyForm(): FormState {
     contactName: "",
     contactEmail: "",
     contactPhone: "",
+    defaultRate: "",
     vatNumber: "",
     purchaseOrderNumber: "",
     invoicePaymentTerms: "",
@@ -100,6 +103,7 @@ function clientToForm(c: Client): FormState {
     contactName: c.contactName ?? "",
     contactEmail: c.contactEmail ?? "",
     contactPhone: c.contactPhone ?? "",
+    defaultRate: c.defaultRate != null ? String(c.defaultRate) : "",
     vatNumber: c.vatNumber ?? "",
     purchaseOrderNumber: c.purchaseOrderNumber ?? "",
     invoicePaymentTerms: c.invoicePaymentTerms != null ? String(c.invoicePaymentTerms) : "",
@@ -424,6 +428,7 @@ function ClientModal({
       contactName: form.contactName || null,
       contactEmail: form.contactEmail || null,
       contactPhone: form.contactPhone || null,
+      defaultRate: form.defaultRate ? parseFloat(form.defaultRate) : null,
       vatNumber: form.vatNumber || null,
       purchaseOrderNumber: form.purchaseOrderNumber || null,
       invoicePaymentTerms: form.invoicePaymentTerms
@@ -634,6 +639,23 @@ function ClientModal({
 
               {/* ── Invoice Settings ─────────────────────────────── */}
               <SectionHeading title="Invoice Settings" />
+
+              <div>
+                <label className="label">Default hourly rate (£/hr)</label>
+                <input
+                  type="number"
+                  className="input w-36"
+                  min="0"
+                  step="0.01"
+                  placeholder="e.g. 95.00"
+                  value={form.defaultRate}
+                  onChange={(e) => set("defaultRate", e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Fallback rate for all projects unless overridden at project level.
+                </p>
+              </div>
+              <div />
 
               <div>
                 <label className="label">VAT number</label>

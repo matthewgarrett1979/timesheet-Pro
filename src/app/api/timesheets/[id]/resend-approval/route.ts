@@ -63,8 +63,11 @@ export async function POST(
 
   const totalHours    = emailEntries.reduce((s, e) => s + Number(e.hours), 0)
   const billableHours = emailEntries.filter(e => e.billable).reduce((s, e) => s + Number(e.hours), 0)
-  const rate          = Number(client.defaultRate ?? 0)
-  const totalValue    = billableHours * rate
+  const totalValue    = entries.reduce((sum, e) => {
+    if (!e.isBillable) return sum
+    const rate = Number((e as { project?: { rateOverride?: unknown } | null }).project?.rateOverride ?? client.defaultRate ?? 0)
+    return sum + Number(e.hours) * rate
+  }, 0)
 
   const emailData = {
     clientName:   client.name,
