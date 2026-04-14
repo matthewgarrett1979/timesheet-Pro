@@ -25,7 +25,7 @@ export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db) as NextAuthOptions["adapter"],
 
   session: {
-    strategy: "database",
+    strategy: "jwt",
     maxAge: SESSION_MAX_AGE,
     updateAge: 60 * 60, // Refresh session expiry every hour of activity
   },
