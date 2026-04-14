@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from "react"
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface Client {
   id: string
   name: string
   reference: string | null
+  managerId: string
+  // Company
   companyName: string | null
   tradingName: string | null
   addressLine1: string | null
@@ -14,14 +18,20 @@ interface Client {
   county: string | null
   postcode: string | null
   country: string
+  // Contact
   vatNumber: string | null
   contactName: string | null
   contactEmail: string | null
   contactPhone: string | null
+  // Invoice
   purchaseOrderNumber: string | null
   invoicePaymentTerms: number | null
   invoiceCurrency: string
+  // Internal
   notes: string | null
+  // Approval
+  approvalType: string
+  approvalGranularity: string
   createdAt: string
 }
 
@@ -36,24 +46,40 @@ interface FormState {
   county: string
   postcode: string
   country: string
-  vatNumber: string
   contactName: string
   contactEmail: string
   contactPhone: string
+  vatNumber: string
   purchaseOrderNumber: string
   invoicePaymentTerms: string
   invoiceCurrency: string
   notes: string
+  approvalType: string
+  approvalGranularity: string
 }
 
 function emptyForm(): FormState {
   return {
-    name: "", reference: "", companyName: "", tradingName: "",
-    addressLine1: "", addressLine2: "", city: "", county: "",
-    postcode: "", country: "United Kingdom", vatNumber: "",
-    contactName: "", contactEmail: "", contactPhone: "",
-    purchaseOrderNumber: "", invoicePaymentTerms: "", invoiceCurrency: "GBP",
+    name: "",
+    reference: "",
+    companyName: "",
+    tradingName: "",
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    county: "",
+    postcode: "",
+    country: "United Kingdom",
+    contactName: "",
+    contactEmail: "",
+    contactPhone: "",
+    vatNumber: "",
+    purchaseOrderNumber: "",
+    invoicePaymentTerms: "",
+    invoiceCurrency: "GBP",
     notes: "",
+    approvalType: "EMAIL",
+    approvalGranularity: "TIMESHEET",
   }
 }
 
@@ -68,17 +94,21 @@ function clientToForm(c: Client): FormState {
     city: c.city ?? "",
     county: c.county ?? "",
     postcode: c.postcode ?? "",
-    country: c.country,
-    vatNumber: c.vatNumber ?? "",
+    country: c.country ?? "United Kingdom",
     contactName: c.contactName ?? "",
     contactEmail: c.contactEmail ?? "",
     contactPhone: c.contactPhone ?? "",
+    vatNumber: c.vatNumber ?? "",
     purchaseOrderNumber: c.purchaseOrderNumber ?? "",
     invoicePaymentTerms: c.invoicePaymentTerms != null ? String(c.invoicePaymentTerms) : "",
-    invoiceCurrency: c.invoiceCurrency,
+    invoiceCurrency: c.invoiceCurrency ?? "GBP",
     notes: c.notes ?? "",
+    approvalType: c.approvalType ?? "EMAIL",
+    approvalGranularity: c.approvalGranularity ?? "TIMESHEET",
   }
 }
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ClientsPage() {
   const [clients, setClients] = useState<Client[]>([])
@@ -94,14 +124,26 @@ export default function ClientsPage() {
 
   useEffect(() => { load() }, [])
 
+  function openNew() {
+    setEditClient(null)
+    setShowModal(true)
+  }
+
+  function openEdit(c: Client) {
+    setEditClient(c)
+    setShowModal(true)
+  }
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
-          <p className="text-sm text-gray-500 mt-1">{clients.length} client{clients.length !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-gray-500 mt-1">
+            {clients.length} client{clients.length !== 1 ? "s" : ""}
+          </p>
         </div>
-        <button className="btn-primary" onClick={() => { setEditClient(null); setShowModal(true) }}>
+        <button className="btn-primary" onClick={openNew}>
           New client
         </button>
       </div>
@@ -122,6 +164,7 @@ export default function ClientsPage() {
                 <th>City</th>
                 <th>Contact</th>
                 <th>Currency</th>
+                <th>Approval</th>
                 <th>Added</th>
                 <th></th>
               </tr>
@@ -138,18 +181,26 @@ export default function ClientsPage() {
                   <td className="text-gray-500 font-mono text-xs">{c.reference ?? "—"}</td>
                   <td className="text-gray-500 text-sm">{c.city ?? "—"}</td>
                   <td className="text-sm">
-                    {c.contactName ? (
-                      <>
-                        <p className="text-gray-700">{c.contactName}</p>
-                        {c.contactEmail && <p className="text-xs text-gray-400">{c.contactEmail}</p>}
-                      </>
-                    ) : "—"}
+                    {c.contactName
+                      ? (
+                        <div>
+                          <p className="text-gray-700">{c.contactName}</p>
+                          {c.contactEmail && (
+                            <p className="text-xs text-gray-400">{c.contactEmail}</p>
+                          )}
+                        </div>
+                      )
+                      : <span className="text-gray-400">—</span>
+                    }
                   </td>
                   <td className="text-sm font-mono text-gray-500">{c.invoiceCurrency}</td>
-                  <td className="text-gray-400">{new Date(c.createdAt).toLocaleDateString("en-GB")}</td>
+                  <td className="text-xs text-gray-500">{c.approvalType}</td>
+                  <td className="text-gray-400">
+                    {new Date(c.createdAt).toLocaleDateString("en-GB")}
+                  </td>
                   <td>
                     <button
-                      onClick={() => { setEditClient(c); setShowModal(true) }}
+                      onClick={() => openEdit(c)}
                       className="text-sm text-blue-600 hover:underline"
                     >
                       Edit
@@ -173,24 +224,17 @@ export default function ClientsPage() {
   )
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function SectionHeading({ title }: { title: string }) {
   return (
-    <div className="border-b border-gray-200 pb-1.5 mb-4 mt-6 first:mt-0">
-      <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">{title}</h3>
+    <div className="col-span-2 mt-5 pb-1.5 border-b border-gray-200 first:mt-0">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{title}</p>
     </div>
   )
 }
 
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="label">
-        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
-      {children}
-    </div>
-  )
-}
+// ─── Modal ────────────────────────────────────────────────────────────────────
 
 function ClientModal({
   client,
@@ -214,26 +258,28 @@ function ClientModal({
     setSaving(true)
     setError("")
 
-    // Convert empty strings to undefined / null for optional fields
     const payload: Record<string, unknown> = {
-      name: form.name,
-      reference: form.reference || undefined,
-      companyName: form.companyName || undefined,
-      tradingName: form.tradingName || undefined,
-      addressLine1: form.addressLine1 || undefined,
+      name: form.name || form.companyName,          // fall back to legal name if display name blank
+      reference: form.reference || null,
+      companyName: form.companyName || null,
+      tradingName: form.tradingName || null,
+      addressLine1: form.addressLine1 || null,
       addressLine2: form.addressLine2 || null,
-      city: form.city || undefined,
+      city: form.city || null,
       county: form.county || null,
-      postcode: form.postcode || undefined,
+      postcode: form.postcode || null,
       country: form.country || "United Kingdom",
-      vatNumber: form.vatNumber || null,
-      contactName: form.contactName || undefined,
-      contactEmail: form.contactEmail || undefined,
+      contactName: form.contactName || null,
+      contactEmail: form.contactEmail || null,
       contactPhone: form.contactPhone || null,
+      vatNumber: form.vatNumber || null,
       purchaseOrderNumber: form.purchaseOrderNumber || null,
-      invoicePaymentTerms: form.invoicePaymentTerms ? parseInt(form.invoicePaymentTerms, 10) : null,
+      invoicePaymentTerms: form.invoicePaymentTerms
+        ? parseInt(form.invoicePaymentTerms, 10) : null,
       invoiceCurrency: form.invoiceCurrency || "GBP",
       notes: form.notes || null,
+      approvalType: form.approvalType,
+      approvalGranularity: form.approvalGranularity,
     }
 
     const url = client ? `/api/clients/${client.id}` : "/api/clients"
@@ -247,7 +293,7 @@ function ClientModal({
 
     setSaving(false)
     if (!res.ok) {
-      const data = await res.json()
+      const data = await res.json().catch(() => ({}))
       setError(data.error ?? "Failed to save client.")
       return
     }
@@ -257,225 +303,314 @@ function ClientModal({
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div
-        className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+        className="bg-white rounded-xl shadow-xl w-full max-w-2xl flex flex-col"
+        style={{ maxHeight: "90vh" }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="text-lg font-semibold">{client ? "Edit Client" : "New Client"}</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            {client ? "Edit Client" : "New Client"}
+          </h2>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-6 py-4 overflow-y-auto flex-1">
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-4">{error}</p>
-          )}
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1 min-h-0">
+          <form id="client-form" onSubmit={handleSubmit} className="px-6 py-5">
+            {error && (
+              <div className="mb-4 rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
 
-          {/* ── Company Details ───────────────────────────────────── */}
-          <SectionHeading title="Company Details" />
+            {/* Grid wrapper — 2 columns, section headings span both */}
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Display name" required>
-              <input
-                type="text"
-                className="input"
-                required
-                value={form.name}
-                onChange={(e) => set("name", e.target.value)}
-              />
-            </Field>
-            <Field label="Reference">
-              <input
-                type="text"
-                className="input font-mono"
-                placeholder="e.g. GD-2024-001"
-                value={form.reference}
-                onChange={(e) => set("reference", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* ── Company Details ──────────────────────────────── */}
+              <SectionHeading title="Company Details" />
 
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <Field label="Legal entity name">
-              <input
-                type="text"
-                className="input"
-                placeholder="As it appears on invoices"
-                value={form.companyName}
-                onChange={(e) => set("companyName", e.target.value)}
-              />
-            </Field>
-            <Field label="Trading name">
-              <input
-                type="text"
-                className="input"
-                placeholder="If different from legal name"
-                value={form.tradingName}
-                onChange={(e) => set("tradingName", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* Legal entity name — full width */}
+              <div className="col-span-2">
+                <label className="label">
+                  Legal entity name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="As it appears on invoices"
+                  required
+                  value={form.companyName}
+                  onChange={(e) => set("companyName", e.target.value)}
+                />
+              </div>
 
-          <div className="mt-3">
-            <Field label="Address line 1">
-              <input
-                type="text"
-                className="input"
-                value={form.addressLine1}
-                onChange={(e) => set("addressLine1", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* Trading name | Internal display name */}
+              <div>
+                <label className="label">Trading name</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="If different from legal name"
+                  value={form.tradingName}
+                  onChange={(e) => set("tradingName", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">Internal display name</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="Short name used in lists"
+                  value={form.name}
+                  onChange={(e) => set("name", e.target.value)}
+                />
+              </div>
 
-          <div className="mt-3">
-            <Field label="Address line 2">
-              <input
-                type="text"
-                className="input"
-                value={form.addressLine2}
-                onChange={(e) => set("addressLine2", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* Reference — half width */}
+              <div>
+                <label className="label">Client reference</label>
+                <input
+                  type="text"
+                  className="input font-mono"
+                  placeholder="e.g. GD-2024-001"
+                  value={form.reference}
+                  onChange={(e) => set("reference", e.target.value)}
+                />
+              </div>
+              <div /> {/* spacer */}
 
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <Field label="City">
-              <input
-                type="text"
-                className="input"
-                value={form.city}
-                onChange={(e) => set("city", e.target.value)}
-              />
-            </Field>
-            <Field label="County">
-              <input
-                type="text"
-                className="input"
-                value={form.county}
-                onChange={(e) => set("county", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* Address line 1 — full width */}
+              <div className="col-span-2">
+                <label className="label">
+                  Address line 1 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  required
+                  value={form.addressLine1}
+                  onChange={(e) => set("addressLine1", e.target.value)}
+                />
+              </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <Field label="Postcode">
-              <input
-                type="text"
-                className="input uppercase"
-                value={form.postcode}
-                onChange={(e) => set("postcode", e.target.value.toUpperCase())}
-              />
-            </Field>
-            <Field label="Country">
-              <input
-                type="text"
-                className="input"
-                value={form.country}
-                onChange={(e) => set("country", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* Address line 2 — full width */}
+              <div className="col-span-2">
+                <label className="label">Address line 2</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.addressLine2}
+                  onChange={(e) => set("addressLine2", e.target.value)}
+                />
+              </div>
 
-          {/* ── Contact Details ───────────────────────────────────── */}
-          <SectionHeading title="Contact Details" />
+              {/* City | County */}
+              <div>
+                <label className="label">
+                  City <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  required
+                  value={form.city}
+                  onChange={(e) => set("city", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">County</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.county}
+                  onChange={(e) => set("county", e.target.value)}
+                />
+              </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Contact name">
-              <input
-                type="text"
-                className="input"
-                value={form.contactName}
-                onChange={(e) => set("contactName", e.target.value)}
-              />
-            </Field>
-            <Field label="Contact phone">
-              <input
-                type="tel"
-                className="input"
-                value={form.contactPhone}
-                onChange={(e) => set("contactPhone", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* Postcode | Country */}
+              <div>
+                <label className="label">
+                  Postcode <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="input uppercase"
+                  required
+                  value={form.postcode}
+                  onChange={(e) => set("postcode", e.target.value.toUpperCase())}
+                />
+              </div>
+              <div>
+                <label className="label">Country</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={form.country}
+                  onChange={(e) => set("country", e.target.value)}
+                />
+              </div>
 
-          <div className="mt-3">
-            <Field label="Contact email">
-              <input
-                type="email"
-                className="input"
-                value={form.contactEmail}
-                onChange={(e) => set("contactEmail", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* ── Contact Details ──────────────────────────────── */}
+              <SectionHeading title="Contact Details" />
 
-          {/* ── Invoice Settings ──────────────────────────────────── */}
-          <SectionHeading title="Invoice Settings" />
+              {/* Contact name | Phone */}
+              <div>
+                <label className="label">
+                  Contact name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className="input"
+                  required
+                  value={form.contactName}
+                  onChange={(e) => set("contactName", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">Contact phone</label>
+                <input
+                  type="tel"
+                  className="input"
+                  value={form.contactPhone}
+                  onChange={(e) => set("contactPhone", e.target.value)}
+                />
+              </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="VAT number">
-              <input
-                type="text"
-                className="input font-mono"
-                placeholder="e.g. GB123456789"
-                value={form.vatNumber}
-                onChange={(e) => set("vatNumber", e.target.value)}
-              />
-            </Field>
-            <Field label="Purchase order number">
-              <input
-                type="text"
-                className="input font-mono"
-                placeholder="Required on some invoices"
-                value={form.purchaseOrderNumber}
-                onChange={(e) => set("purchaseOrderNumber", e.target.value)}
-              />
-            </Field>
-          </div>
+              {/* Contact email — full width */}
+              <div className="col-span-2">
+                <label className="label">
+                  Contact email <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  className="input"
+                  required
+                  value={form.contactEmail}
+                  onChange={(e) => set("contactEmail", e.target.value)}
+                />
+              </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-3">
-            <Field label="Payment terms (days)">
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="365"
-                placeholder="e.g. 30"
-                value={form.invoicePaymentTerms}
-                onChange={(e) => set("invoicePaymentTerms", e.target.value)}
-              />
-            </Field>
-            <Field label="Invoice currency">
-              <select
-                className="input"
-                value={form.invoiceCurrency}
-                onChange={(e) => set("invoiceCurrency", e.target.value)}
-              >
-                <option value="GBP">GBP — British Pound</option>
-                <option value="USD">USD — US Dollar</option>
-                <option value="EUR">EUR — Euro</option>
-                <option value="CAD">CAD — Canadian Dollar</option>
-                <option value="AUD">AUD — Australian Dollar</option>
-              </select>
-            </Field>
-          </div>
+              {/* ── Invoice Settings ─────────────────────────────── */}
+              <SectionHeading title="Invoice Settings" />
 
-          {/* ── Internal Notes ────────────────────────────────────── */}
-          <SectionHeading title="Internal Notes" />
+              {/* VAT number | PO number */}
+              <div>
+                <label className="label">VAT number</label>
+                <input
+                  type="text"
+                  className="input font-mono"
+                  placeholder="e.g. GB123456789"
+                  value={form.vatNumber}
+                  onChange={(e) => set("vatNumber", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">Purchase order number</label>
+                <input
+                  type="text"
+                  className="input font-mono"
+                  placeholder="Required on some invoices"
+                  value={form.purchaseOrderNumber}
+                  onChange={(e) => set("purchaseOrderNumber", e.target.value)}
+                />
+              </div>
 
-          <textarea
-            className="input"
-            rows={3}
-            placeholder="Internal notes — not shown on invoices"
-            value={form.notes}
-            onChange={(e) => set("notes", e.target.value)}
-          />
+              {/* Payment terms | Currency */}
+              <div>
+                <label className="label">Payment terms (days)</label>
+                <input
+                  type="number"
+                  className="input"
+                  min="1"
+                  max="365"
+                  placeholder="e.g. 30"
+                  value={form.invoicePaymentTerms}
+                  onChange={(e) => set("invoicePaymentTerms", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="label">Invoice currency</label>
+                <select
+                  className="input"
+                  value={form.invoiceCurrency}
+                  onChange={(e) => set("invoiceCurrency", e.target.value)}
+                >
+                  <option value="GBP">GBP — British Pound</option>
+                  <option value="USD">USD — US Dollar</option>
+                  <option value="EUR">EUR — Euro</option>
+                  <option value="CAD">CAD — Canadian Dollar</option>
+                  <option value="AUD">AUD — Australian Dollar</option>
+                </select>
+              </div>
 
-          <div className="flex justify-end gap-3 pt-4 mt-2">
-            <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
-            <button type="submit" disabled={saving} className="btn-primary">
-              {saving ? "Saving…" : client ? "Save changes" : "Create client"}
-            </button>
-          </div>
-        </form>
+              {/* ── Internal Notes ───────────────────────────────── */}
+              <SectionHeading title="Internal Notes" />
+
+              <div className="col-span-2">
+                <textarea
+                  className="input"
+                  rows={3}
+                  placeholder="Internal notes — not shown on invoices"
+                  value={form.notes}
+                  onChange={(e) => set("notes", e.target.value)}
+                />
+              </div>
+
+              {/* ── Approval Settings ────────────────────────────── */}
+              <SectionHeading title="Approval Settings" />
+
+              {/* Approval type | Granularity */}
+              <div>
+                <label className="label">Approval type</label>
+                <select
+                  className="input"
+                  value={form.approvalType}
+                  onChange={(e) => set("approvalType", e.target.value)}
+                >
+                  <option value="EMAIL">Email link</option>
+                  <option value="PORTAL">Client portal</option>
+                  <option value="NONE">Not required</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">Approval granularity</label>
+                <select
+                  className="input"
+                  value={form.approvalGranularity}
+                  onChange={(e) => set("approvalGranularity", e.target.value)}
+                >
+                  <option value="TIMESHEET">Per timesheet (weekly)</option>
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="QUARTERLY">Quarterly</option>
+                </select>
+              </div>
+
+              {/* Manager ID — read-only */}
+              {client?.managerId && (
+                <div className="col-span-2">
+                  <label className="label">Assigned manager ID</label>
+                  <input
+                    type="text"
+                    className="input font-mono text-gray-400 bg-gray-50"
+                    value={client.managerId}
+                    readOnly
+                  />
+                </div>
+              )}
+
+            </div>{/* /grid */}
+          </form>
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-200 flex-shrink-0 flex justify-end gap-3">
+          <button type="button" onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
+          <button type="submit" form="client-form" disabled={saving} className="btn-primary">
+            {saving ? "Saving…" : client ? "Save changes" : "Create client"}
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -132,6 +132,10 @@ model Client {
   invoiceCurrency     String   @default("GBP")
   notes               String?  // Internal only — never shown on invoice
 
+  // Approval workflow
+  approvalType        String   @default("EMAIL")     // EMAIL | PORTAL | NONE
+  approvalGranularity String   @default("TIMESHEET") // TIMESHEET | MONTHLY | QUARTERLY
+
   timesheets Timesheet[]
   projects   Project[]
   expenses   Expense[]

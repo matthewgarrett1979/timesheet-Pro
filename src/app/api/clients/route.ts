@@ -35,6 +35,9 @@ const createSchema = z.object({
   invoiceCurrency: z.string().trim().length(3).optional(),
   // Internal
   notes: z.string().trim().max(2000).optional(),
+  // Approval workflow
+  approvalType: z.enum(["EMAIL", "PORTAL", "NONE"]).optional(),
+  approvalGranularity: z.enum(["TIMESHEET", "MONTHLY", "QUARTERLY"]).optional(),
 })
 
 export async function GET(req: NextRequest) {
@@ -98,6 +101,8 @@ export async function POST(req: NextRequest) {
       invoicePaymentTerms: body.invoicePaymentTerms,
       invoiceCurrency: body.invoiceCurrency ?? "GBP",
       notes: body.notes,
+      approvalType: body.approvalType ?? "EMAIL",
+      approvalGranularity: body.approvalGranularity ?? "TIMESHEET",
       managerId: session.user.id,
     },
   })

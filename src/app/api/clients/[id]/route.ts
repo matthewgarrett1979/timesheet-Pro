@@ -35,6 +35,9 @@ const updateSchema = z.object({
   invoiceCurrency: z.string().trim().length(3).optional(),
   // Internal
   notes: z.string().trim().max(2000).nullable().optional(),
+  // Approval workflow
+  approvalType: z.enum(["EMAIL", "PORTAL", "NONE"]).optional(),
+  approvalGranularity: z.enum(["TIMESHEET", "MONTHLY", "QUARTERLY"]).optional(),
 })
 
 async function getAuthedSession(req: NextRequest) {
