@@ -25,7 +25,7 @@ export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(db) as NextAuthOptions["adapter"],
 
   session: {
-    strategy: "jwt",
+    strategy: "database",
     maxAge: SESSION_MAX_AGE,
     updateAge: 60 * 60, // Refresh session expiry every hour of activity
   },
@@ -147,28 +147,24 @@ export const authOptions: NextAuthOptions = {
   ],
 
   callbacks: {
-    async session({ session, user }) {
-      // Augment session with role, mfaEnabled, and per-session mfaVerified
-      const dbUser = await db.user.findUnique({
-        where: { id: user.id },
-        select: { role: true, mfaEnabled: true },
-      })
-
-      // Fetch the current session's mfaVerified flag
-      const dbSession = await db.session.findFirst({
-        where: { userId: user.id, expires: { gt: new Date() } },
-        orderBy: { expires: "desc" },
-        select: { mfaVerified: true },
-      })
-
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id
+        token.role = (user as any).role
+        token.mfaEnabled = (user as any).mfaEnabled
+        token.mfaVerified = !(user as any).mfaEnabled
+      }
+      return token
+    },
+    async session({ session, token }) {
       return {
         ...session,
         user: {
           ...session.user,
-          id: user.id,
-          role: dbUser?.role ?? Role.MANAGER,
-          mfaEnabled: dbUser?.mfaEnabled ?? false,
-          mfaVerified: dbSession?.mfaVerified ?? !dbUser?.mfaEnabled,
+          id: token.id as string,
+          role: token.role,
+          mfaEnabled: token.mfaEnabled,
+          mfaVerified: token.mfaVerified,
         },
       }
     },
