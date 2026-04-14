@@ -229,7 +229,6 @@ function TimesheetsContent() {
       {showCreate && (
         <CreateTimesheetModal
           clients={clients}
-          projects={projects}
           onClose={() => setShowCreate(false)}
           onSaved={() => { setShowCreate(false); load() }}
         />
@@ -238,32 +237,56 @@ function TimesheetsContent() {
   )
 }
 
+function getMondayOfCurrentWeek(): string {
+  const today = new Date()
+  const day = today.getDay() // 0 = Sun, 1 = Mon … 6 = Sat
+  const diff = day === 0 ? -6 : 1 - day
+  const monday = new Date(today)
+  monday.setDate(today.getDate() + diff)
+  return monday.toISOString().split("T")[0]
+}
+
 function CreateTimesheetModal({
   clients,
-  projects,
   onClose,
   onSaved,
 }: {
   clients: Client[]
-  projects: ProjectOption[]
   onClose: () => void
   onSaved: () => void
 }) {
   const [clientId, setClientId] = useState("")
-  const [weekStart, setWeekStart] = useState("")
+  const [weekStart, setWeekStart] = useState(() => getMondayOfCurrentWeek())
   const [entries, setEntries] = useState([
     { date: "", hours: "8", description: "", projectId: "" },
   ])
+  const [clientProjects, setClientProjects] = useState<ProjectOption[]>([])
+  const [loadingProjects, setLoadingProjects] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
-  const activeProjectsForClient = projects.filter(
-    (p) => p.clientId === clientId && p.active
-  )
+  // Fetch projects for the selected client whenever clientId changes
+  useEffect(() => {
+    if (!clientId) {
+      setClientProjects([])
+      return
+    }
+    setLoadingProjects(true)
+    fetch(`/api/projects?clientId=${clientId}&active=true`)
+      .then((r) => r.json())
+      .then((data) => {
+        setClientProjects(Array.isArray(data) ? data : [])
+        setLoadingProjects(false)
+      })
+      .catch(() => {
+        setClientProjects([])
+        setLoadingProjects(false)
+      })
+  }, [clientId])
 
   function handleClientChange(id: string) {
     setClientId(id)
-    // Reset project on each entry when client changes
+    setClientProjects([])
     setEntries((prev) => prev.map((e) => ({ ...e, projectId: "" })))
   }
 
@@ -313,13 +336,22 @@ function CreateTimesheetModal({
     onSaved()
   }
 
+  const projectDisabled = !clientId || loadingProjects
+  const projectPlaceholder = !clientId
+    ? "Select a client first"
+    : loadingProjects
+    ? "Loading projects…"
+    : clientProjects.length === 0
+    ? "No projects — add one first"
+    : "Select…"
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-box max-w-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold">New Timesheet</h2>
         </div>
-        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4 max-h-[80vh] overflow-y-auto">
           {error && (
             <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
           )}
@@ -347,50 +379,72 @@ function CreateTimesheetModal({
               )}
             </div>
 
-            {clientId && activeProjectsForClient.length === 0 && (
+            {clientId && !loadingProjects && clientProjects.length === 0 && (
               <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2 mb-2">
                 No active projects for this client. <a href="/projects" className="underline">Create a project</a> first.
               </p>
             )}
 
             <div className="space-y-2">
-              {/* Column headers */}
-              <div className="grid grid-cols-12 gap-2 px-0">
-                <span className="col-span-3 text-xs text-gray-400">Date</span>
-                <span className="col-span-2 text-xs text-gray-400">Hours</span>
-                <span className="col-span-3 text-xs text-gray-400">Project *</span>
-                <span className="col-span-3 text-xs text-gray-400">Description</span>
-              </div>
               {entries.map((entry, i) => (
-                <div key={i} className="grid grid-cols-12 gap-2 items-start">
-                  <div className="col-span-3">
-                    <input type="date" className="input text-xs" required value={entry.date} onChange={(e) => updateEntry(i, "date", e.target.value)} />
+                <div key={i} className="rounded-md border border-gray-200 bg-gray-50/50 p-3 space-y-2">
+                  <div className="grid grid-cols-12 gap-2 items-center">
+                    <div className="col-span-4">
+                      <input
+                        type="date"
+                        className="input text-xs"
+                        required
+                        value={entry.date}
+                        onChange={(e) => updateEntry(i, "date", e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <input
+                        type="number"
+                        className="input text-xs"
+                        step="0.25"
+                        min="0.25"
+                        max="24"
+                        required
+                        placeholder="hrs"
+                        value={entry.hours}
+                        onChange={(e) => updateEntry(i, "hours", e.target.value)}
+                      />
+                    </div>
+                    <div className="col-span-5">
+                      <select
+                        className="input text-xs"
+                        required
+                        value={entry.projectId}
+                        onChange={(e) => updateEntry(i, "projectId", e.target.value)}
+                        disabled={projectDisabled || clientProjects.length === 0}
+                      >
+                        <option value="">{projectPlaceholder}</option>
+                        {clientProjects.map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-span-1 flex justify-center">
+                      {entries.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeEntry(i)}
+                          className="text-gray-400 hover:text-red-500 text-xl leading-none"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div className="col-span-2">
-                    <input type="number" className="input text-xs" step="0.25" min="0.25" max="24" required value={entry.hours} onChange={(e) => updateEntry(i, "hours", e.target.value)} />
-                  </div>
-                  <div className="col-span-3">
-                    <select
-                      className="input text-xs"
-                      required
-                      value={entry.projectId}
-                      onChange={(e) => updateEntry(i, "projectId", e.target.value)}
-                      disabled={!clientId}
-                    >
-                      <option value="">Select…</option>
-                      {activeProjectsForClient.map((p) => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="col-span-3">
-                    <input type="text" className="input text-xs" placeholder="Description" required value={entry.description} onChange={(e) => updateEntry(i, "description", e.target.value)} />
-                  </div>
-                  <div className="col-span-1 flex items-center pt-1">
-                    {entries.length > 1 && (
-                      <button type="button" onClick={() => removeEntry(i)} className="text-gray-400 hover:text-red-500 text-lg leading-none">×</button>
-                    )}
-                  </div>
+                  <textarea
+                    className="input text-xs resize-none"
+                    rows={2}
+                    placeholder="Description of work performed *"
+                    required
+                    value={entry.description}
+                    onChange={(e) => updateEntry(i, "description", e.target.value)}
+                  />
                 </div>
               ))}
             </div>
