@@ -21,8 +21,6 @@ const LOCKOUT_MS = 15 * 60 * 1000   // 15 minutes
 const SESSION_MAX_AGE = 8 * 60 * 60 // 8 hours in seconds
 
 export const authOptions: NextAuthOptions = {
-  // Database sessions — can be revoked server-side (security incidents, logout)
-  adapter: PrismaAdapter(db) as NextAuthOptions["adapter"],
 
   session: {
     strategy: "jwt",
@@ -194,5 +192,6 @@ export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   debug: process.env.NODE_ENV === "development",
 }
+
 
 
