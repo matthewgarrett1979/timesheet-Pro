@@ -198,12 +198,11 @@ export const authOptions: NextAuthOptions = {
   },
 
   events: {
-    // Works for both JWT (token) and database (session) strategies
     async signOut(message) {
       const userId =
         "token" in message
           ? (message.token as { id?: string })?.id
-          : (message.session as { userId?: string })?.userId
+          : undefined
       if (userId) {
         await audit({
           userId,
