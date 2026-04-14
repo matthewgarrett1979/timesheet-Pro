@@ -58,6 +58,8 @@ enum AuditAction {
   INVOICE_SENT
   CLIENT_CREATED
   CLIENT_UPDATED
+  CLIENT_DELETED
+  CLIENT_ARCHIVED
   PROJECT_CREATED
   PROJECT_UPDATED
   EXPENSE_CREATED
@@ -135,6 +137,9 @@ model Client {
   // Approval workflow
   approvalType        String   @default("EMAIL")     // EMAIL | PORTAL | NONE
   approvalGranularity String   @default("TIMESHEET") // TIMESHEET | MONTHLY | QUARTERLY
+
+  // Soft-delete / archive
+  isArchived          Boolean  @default(false)
 
   timesheets Timesheet[]
   projects   Project[]

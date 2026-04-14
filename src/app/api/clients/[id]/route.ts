@@ -1,6 +1,7 @@
 /**
- * GET   /api/clients/[id]  — fetch a single client (ownership enforced)
- * PATCH /api/clients/[id]  — update a client (ownership enforced)
+ * GET    /api/clients/[id]  — fetch a single client (ownership enforced)
+ * PATCH  /api/clients/[id]  — update a client (ownership enforced)
+ * DELETE /api/clients/[id]  — delete a client if it has no associated records
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -23,7 +24,7 @@ const updateSchema = z.object({
   city: z.string().trim().max(100).nullish(),
   county: z.string().trim().max(100).nullish(),
   postcode: z.string().trim().max(20).nullish(),
-  country: z.string().trim().max(100).optional(),     // non-nullable in DB, has default
+  country: z.string().trim().max(100).optional(),     // non-nullable in DB
   // Contact
   contactName: z.string().trim().max(200).nullish(),
   contactEmail: z.string().trim().email().nullish(),
@@ -32,12 +33,14 @@ const updateSchema = z.object({
   vatNumber: z.string().trim().max(50).nullish(),
   purchaseOrderNumber: z.string().trim().max(100).nullish(),
   invoicePaymentTerms: z.number().int().positive().nullish(),
-  invoiceCurrency: z.string().trim().length(3).optional(), // non-nullable in DB, has default
+  invoiceCurrency: z.string().trim().length(3).optional(), // non-nullable in DB
   // Internal
   notes: z.string().trim().max(2000).nullish(),
   // Approval workflow
   approvalType: z.enum(["EMAIL", "PORTAL", "NONE"]).optional(),
   approvalGranularity: z.enum(["TIMESHEET", "MONTHLY", "QUARTERLY"]).optional(),
+  // Archive / restore
+  isArchived: z.boolean().optional(),
 })
 
 async function getAuthedSession(req: NextRequest) {
@@ -55,7 +58,6 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Next.js 15: params is a Promise
   const { id } = await params
 
   const auth = await getAuthedSession(req)
@@ -80,7 +82,6 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  // Next.js 15: params is a Promise
   const { id } = await params
 
   const auth = await getAuthedSession(req)
@@ -88,7 +89,6 @@ export async function PATCH(
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
-  // Verify ownership before updating
   const existing = await getClientForUser(
     id,
     auth.session.user.id,
@@ -120,16 +120,84 @@ export async function PATCH(
     data: body,
   })
 
+  // Use CLIENT_ARCHIVED for archive/unarchive actions, CLIENT_UPDATED for all else
+  const isArchiveToggle = body.isArchived !== undefined
   await audit({
     userId: auth.session.user.id,
-    action: AuditAction.CLIENT_UPDATED,
+    action: isArchiveToggle ? AuditAction.CLIENT_ARCHIVED : AuditAction.CLIENT_UPDATED,
     resource: "client",
     resourceId: id,
-    metadata: { changes: body },
+    metadata: isArchiveToggle
+      ? { archived: body.isArchived, name: existing.name }
+      : { changes: body },
     ipAddress: getClientIp(req),
     userAgent: req.headers.get("user-agent") ?? undefined,
     success: true,
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const auth = await getAuthedSession(req)
+  if ("error" in auth) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status })
+  }
+
+  const existing = await getClientForUser(
+    id,
+    auth.session.user.id,
+    auth.session.user.role as Role
+  )
+
+  if (!existing) {
+    await audit({
+      userId: auth.session.user.id,
+      action: AuditAction.UNAUTHORISED_ACCESS,
+      resource: "client",
+      resourceId: id,
+      metadata: { action: "delete" },
+      ipAddress: getClientIp(req),
+      success: false,
+    })
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
+  // Block deletion if any associated records exist
+  const [timesheets, invoices, expenses, projects] = await Promise.all([
+    db.timesheet.count({ where: { clientId: id } }),
+    db.invoice.count({ where: { clientId: id } }),
+    db.expense.count({ where: { clientId: id } }),
+    db.project.count({ where: { clientId: id } }),
+  ])
+
+  if (timesheets + invoices + expenses + projects > 0) {
+    return NextResponse.json(
+      {
+        error: `Cannot delete — this client has associated timesheets, projects or invoices. Archive the client instead.`,
+        counts: { timesheets, invoices, expenses, projects },
+      },
+      { status: 409 }
+    )
+  }
+
+  await db.client.delete({ where: { id } })
+
+  await audit({
+    userId: auth.session.user.id,
+    action: AuditAction.CLIENT_DELETED,
+    resource: "client",
+    resourceId: id,
+    metadata: { name: existing.name, reference: existing.reference },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }

@@ -1,0 +1,2 @@
+node -e "const p=require('./package.json'); const [ma,mi,pa]=p.version.split('.'); p.version=ma+'.'+mi+'.'+(parseInt(pa)+1); require('fs').writeFileSync('./package.json',JSON.stringify(p,null,2)+'\n');"
+git add package.json

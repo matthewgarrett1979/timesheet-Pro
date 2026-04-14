@@ -32,6 +32,8 @@ interface Client {
   // Approval
   approvalType: string
   approvalGranularity: string
+  // Archive
+  isArchived: boolean
   createdAt: string
 }
 
@@ -115,6 +117,12 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [editClient, setEditClient] = useState<Client | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
+
+  // Delete confirmation state
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null)
+  const [deleteError, setDeleteError] = useState("")
+  const [deleteInProgress, setDeleteInProgress] = useState(false)
 
   async function load() {
     const res = await fetch("/api/clients")
@@ -134,26 +142,74 @@ export default function ClientsPage() {
     setShowModal(true)
   }
 
+  function openDelete(c: Client) {
+    setDeleteTarget(c)
+    setDeleteError("")
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleteInProgress(true)
+    const res = await fetch(`/api/clients/${deleteTarget.id}`, { method: "DELETE" })
+    setDeleteInProgress(false)
+
+    if (res.status === 204) {
+      setDeleteTarget(null)
+      load()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setDeleteError(data.error ?? "Failed to delete client.")
+    }
+  }
+
+  async function toggleArchive(c: Client, archive: boolean) {
+    const res = await fetch(`/api/clients/${c.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isArchived: archive }),
+    })
+    if (res.ok) load()
+  }
+
+  // Split into active / archived
+  const activeClients = clients.filter((c) => !c.isArchived)
+  const archivedClients = clients.filter((c) => c.isArchived)
+  const visibleClients = showArchived ? clients : activeClients
+  const displayCount = showArchived
+    ? `${activeClients.length} active, ${archivedClients.length} archived`
+    : `${activeClients.length} client${activeClients.length !== 1 ? "s" : ""}${archivedClients.length > 0 ? ` · ${archivedClients.length} archived` : ""}`
+
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clients</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {clients.length} client{clients.length !== 1 ? "s" : ""}
-          </p>
+          <p className="text-sm text-gray-500 mt-1">{displayCount}</p>
         </div>
-        <button className="btn-primary" onClick={openNew}>
-          New client
-        </button>
+        <div className="flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => setShowArchived(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Show archived
+          </label>
+          <button className="btn-primary" onClick={openNew}>
+            New client
+          </button>
+        </div>
       </div>
 
       <div className="card overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
-        ) : clients.length === 0 ? (
+        ) : visibleClients.length === 0 ? (
           <div className="p-8 text-center text-sm text-gray-400">
-            No clients yet. Add your first client to get started.
+            {showArchived
+              ? "No archived clients."
+              : "No clients yet. Add your first client to get started."}
           </div>
         ) : (
           <table className="data-table">
@@ -170,28 +226,37 @@ export default function ClientsPage() {
               </tr>
             </thead>
             <tbody>
-              {clients.map((c) => (
-                <tr key={c.id}>
+              {visibleClients.map((c) => (
+                <tr
+                  key={c.id}
+                  className={c.isArchived ? "opacity-50" : undefined}
+                >
                   <td>
-                    <p className="font-medium text-gray-900">{c.companyName ?? c.name}</p>
-                    {c.companyName && c.companyName !== c.name && (
-                      <p className="text-xs text-gray-400">{c.name}</p>
-                    )}
+                    <div className="flex items-center gap-2">
+                      <div>
+                        <p className="font-medium text-gray-900">{c.companyName ?? c.name}</p>
+                        {c.companyName && c.companyName !== c.name && (
+                          <p className="text-xs text-gray-400">{c.name}</p>
+                        )}
+                      </div>
+                      {c.isArchived && (
+                        <span className="badge badge-draft text-xs">Archived</span>
+                      )}
+                    </div>
                   </td>
                   <td className="text-gray-500 font-mono text-xs">{c.reference ?? "—"}</td>
                   <td className="text-gray-500 text-sm">{c.city ?? "—"}</td>
                   <td className="text-sm">
-                    {c.contactName
-                      ? (
-                        <div>
-                          <p className="text-gray-700">{c.contactName}</p>
-                          {c.contactEmail && (
-                            <p className="text-xs text-gray-400">{c.contactEmail}</p>
-                          )}
-                        </div>
-                      )
-                      : <span className="text-gray-400">—</span>
-                    }
+                    {c.contactName ? (
+                      <div>
+                        <p className="text-gray-700">{c.contactName}</p>
+                        {c.contactEmail && (
+                          <p className="text-xs text-gray-400">{c.contactEmail}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400">—</span>
+                    )}
                   </td>
                   <td className="text-sm font-mono text-gray-500">{c.invoiceCurrency}</td>
                   <td className="text-xs text-gray-500">{c.approvalType}</td>
@@ -199,12 +264,37 @@ export default function ClientsPage() {
                     {new Date(c.createdAt).toLocaleDateString("en-GB")}
                   </td>
                   <td>
-                    <button
-                      onClick={() => openEdit(c)}
-                      className="text-sm text-blue-600 hover:underline"
-                    >
-                      Edit
-                    </button>
+                    <div className="flex items-center gap-3 text-sm">
+                      <button
+                        onClick={() => openEdit(c)}
+                        className="text-blue-600 hover:underline"
+                      >
+                        Edit
+                      </button>
+                      {c.isArchived ? (
+                        <button
+                          onClick={() => toggleArchive(c, false)}
+                          className="text-gray-500 hover:underline"
+                        >
+                          Unarchive
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => toggleArchive(c, true)}
+                            className="text-gray-500 hover:underline"
+                          >
+                            Archive
+                          </button>
+                          <button
+                            onClick={() => openDelete(c)}
+                            className="text-red-500 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -213,12 +303,74 @@ export default function ClientsPage() {
         )}
       </div>
 
+      {/* Edit / New client modal */}
       {showModal && (
         <ClientModal
           client={editClient}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); load() }}
         />
+      )}
+
+      {/* Delete confirmation modal */}
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => { setDeleteTarget(null); setDeleteError("") }}>
+          <div
+            className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {deleteError ? (
+              <>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Cannot delete client</h3>
+                <p className="text-sm text-gray-600 mb-4">{deleteError}</p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => { setDeleteTarget(null); setDeleteError("") }}
+                    className="btn-secondary"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => {
+                      toggleArchive(deleteTarget, true)
+                      setDeleteTarget(null)
+                      setDeleteError("")
+                    }}
+                    className="btn-primary"
+                  >
+                    Archive instead
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Delete client?</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Are you sure you want to delete{" "}
+                  <span className="font-medium">
+                    {deleteTarget.companyName ?? deleteTarget.name}
+                  </span>
+                  ? This cannot be undone.
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => setDeleteTarget(null)}
+                    className="btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmDelete}
+                    disabled={deleteInProgress}
+                    className="btn-danger"
+                  >
+                    {deleteInProgress ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -259,7 +411,7 @@ function ClientModal({
     setError("")
 
     const payload: Record<string, unknown> = {
-      name: form.name || form.companyName,          // fall back to legal name if display name blank
+      name: form.name || form.companyName,
       reference: form.reference || null,
       companyName: form.companyName || null,
       tradingName: form.tradingName || null,
@@ -323,13 +475,11 @@ function ClientModal({
               </div>
             )}
 
-            {/* Grid wrapper — 2 columns, section headings span both */}
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
 
               {/* ── Company Details ──────────────────────────────── */}
               <SectionHeading title="Company Details" />
 
-              {/* Legal entity name — full width */}
               <div className="col-span-2">
                 <label className="label">
                   Legal entity name <span className="text-red-500">*</span>
@@ -344,7 +494,6 @@ function ClientModal({
                 />
               </div>
 
-              {/* Trading name | Internal display name */}
               <div>
                 <label className="label">Trading name</label>
                 <input
@@ -366,7 +515,6 @@ function ClientModal({
                 />
               </div>
 
-              {/* Reference — half width */}
               <div>
                 <label className="label">Client reference</label>
                 <input
@@ -377,9 +525,8 @@ function ClientModal({
                   onChange={(e) => set("reference", e.target.value)}
                 />
               </div>
-              <div /> {/* spacer */}
+              <div />
 
-              {/* Address line 1 — full width */}
               <div className="col-span-2">
                 <label className="label">
                   Address line 1 <span className="text-red-500">*</span>
@@ -393,7 +540,6 @@ function ClientModal({
                 />
               </div>
 
-              {/* Address line 2 — full width */}
               <div className="col-span-2">
                 <label className="label">Address line 2</label>
                 <input
@@ -404,7 +550,6 @@ function ClientModal({
                 />
               </div>
 
-              {/* City | County */}
               <div>
                 <label className="label">
                   City <span className="text-red-500">*</span>
@@ -427,7 +572,6 @@ function ClientModal({
                 />
               </div>
 
-              {/* Postcode | Country */}
               <div>
                 <label className="label">
                   Postcode <span className="text-red-500">*</span>
@@ -453,7 +597,6 @@ function ClientModal({
               {/* ── Contact Details ──────────────────────────────── */}
               <SectionHeading title="Contact Details" />
 
-              {/* Contact name | Phone */}
               <div>
                 <label className="label">
                   Contact name <span className="text-red-500">*</span>
@@ -476,7 +619,6 @@ function ClientModal({
                 />
               </div>
 
-              {/* Contact email — full width */}
               <div className="col-span-2">
                 <label className="label">
                   Contact email <span className="text-red-500">*</span>
@@ -493,7 +635,6 @@ function ClientModal({
               {/* ── Invoice Settings ─────────────────────────────── */}
               <SectionHeading title="Invoice Settings" />
 
-              {/* VAT number | PO number */}
               <div>
                 <label className="label">VAT number</label>
                 <input
@@ -515,7 +656,6 @@ function ClientModal({
                 />
               </div>
 
-              {/* Payment terms | Currency */}
               <div>
                 <label className="label">Payment terms (days)</label>
                 <input
@@ -559,7 +699,6 @@ function ClientModal({
               {/* ── Approval Settings ────────────────────────────── */}
               <SectionHeading title="Approval Settings" />
 
-              {/* Approval type | Granularity */}
               <div>
                 <label className="label">Approval type</label>
                 <select
@@ -585,7 +724,6 @@ function ClientModal({
                 </select>
               </div>
 
-              {/* Manager ID — read-only */}
               {client?.managerId && (
                 <div className="col-span-2">
                   <label className="label">Assigned manager ID</label>
@@ -598,7 +736,7 @@ function ClientModal({
                 </div>
               )}
 
-            </div>{/* /grid */}
+            </div>
           </form>
         </div>
 
