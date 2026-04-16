@@ -16,6 +16,7 @@ import { db } from "./db"
 // ---------------------------------------------------------------------------
 
 export async function getClientForUser(clientId: string, userId: string, role: Role) {
+  if (role === Role.USER) return null
   return db.client.findFirst({
     where: {
       id: clientId,
@@ -25,6 +26,7 @@ export async function getClientForUser(clientId: string, userId: string, role: R
 }
 
 export async function listClientsForUser(userId: string, role: Role) {
+  if (role === Role.USER) return []
   return db.client.findMany({
     where: role !== Role.ADMIN ? { managerId: userId } : {},
     orderBy: { name: "asc" },
@@ -182,6 +184,13 @@ export async function assertClientOwnership(
 // ---------------------------------------------------------------------------
 
 export async function getProjectForUser(projectId: string, userId: string, role: Role) {
+  if (role === Role.USER) {
+    const assignment = await db.userProject.findUnique({
+      where: { userId_projectId: { userId, projectId } },
+      include: { project: { include: { client: { select: { id: true, name: true } } } } },
+    })
+    return assignment?.project ?? null
+  }
   return db.project.findFirst({
     where: {
       id: projectId,
@@ -196,6 +205,20 @@ export async function listProjectsForUser(
   role: Role,
   filters?: { clientId?: string; active?: boolean }
 ) {
+  if (role === Role.USER) {
+    const assignments = await db.userProject.findMany({
+      where: { userId },
+      include: { project: { include: { client: { select: { id: true, name: true } } } } },
+    })
+    let projects = assignments.map((a) => a.project)
+    if (filters?.clientId !== undefined) {
+      projects = projects.filter((p) => p.clientId === filters.clientId)
+    }
+    if (filters?.active !== undefined) {
+      projects = projects.filter((p) => p.active === filters.active)
+    }
+    return projects
+  }
   return db.project.findMany({
     where: {
       ...(role !== Role.ADMIN ? { managerId: userId } : {}),
@@ -242,6 +265,7 @@ export async function listExpensesForUser(
 // ---------------------------------------------------------------------------
 
 export async function listInvoicesForUser(userId: string, role: Role) {
+  if (role === Role.USER) return []
   return db.invoice.findMany({
     where: role !== Role.ADMIN ? { managerId: userId } : {},
     include: {

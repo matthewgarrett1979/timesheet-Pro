@@ -14,6 +14,7 @@ datasource db {
 enum Role {
   ADMIN
   MANAGER
+  USER
 }
 
 enum TimesheetStatus {
@@ -103,6 +104,7 @@ enum AuditAction {
   RESET_TO_DRAFT
   PARTIALLY_APPROVED
   RESEND_EMAIL
+  TIMESHEET_DELETED
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +131,8 @@ model User {
   // Internal cost rate (never exposed to clients / invoices)
   costRate      Decimal?  @db.Decimal(10, 2)
 
+  mustChangePassword Boolean @default(false)
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -140,6 +144,7 @@ model User {
   expenses       Expense[]
   auditLogs      AuditLog[]
   approvalTokens ApprovalToken[]
+  userProjects   UserProject[]
 
   // NextAuth
   accounts       Account[]
@@ -209,14 +214,29 @@ model Project {
   budgetValue      Decimal?    @db.Decimal(10, 2)
   drawdownRate     Decimal?    @db.Decimal(10, 2)
 
-  phases      ProjectPhase[]
-  timeEntries TimeEntry[]
+  phases       ProjectPhase[]
+  timeEntries  TimeEntry[]
+  userProjects UserProject[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([managerId])
   @@index([clientId])
+}
+
+model UserProject {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedAt DateTime @default(now())
+  assignedBy String   // userId of the admin/manager who made the assignment
+
+  @@unique([userId, projectId])
+  @@index([userId])
+  @@index([projectId])
 }
 
 model ProjectPhase {

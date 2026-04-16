@@ -156,6 +156,7 @@ export const authOptions: NextAuthOptions = {
             name: user.name,
             role: user.role,
             mfaEnabled: user.mfaEnabled,
+            mustChangePassword: user.mustChangePassword,
           }
         } catch (err) {
           // Re-throw AccountLocked so NextAuth surfaces it to the client
@@ -187,11 +188,17 @@ export const authOptions: NextAuthOptions = {
         token.mfaEnabled = (user as { mfaEnabled: boolean }).mfaEnabled
         // mfaVerified starts true if MFA is not enabled on the account
         token.mfaVerified = !(user as { mfaEnabled: boolean }).mfaEnabled
+        token.mustChangePassword = (user as { mustChangePassword: boolean }).mustChangePassword
       }
 
       // Client called update({ mfaVerified: true }) after TOTP/recovery success
       if (trigger === "update" && session?.mfaVerified === true) {
         token.mfaVerified = true
+      }
+
+      // Client called update({ mustChangePassword: false }) after successful password change
+      if (trigger === "update" && session?.mustChangePassword === false) {
+        token.mustChangePassword = false
       }
 
       return token
@@ -210,6 +217,7 @@ export const authOptions: NextAuthOptions = {
           role: token.role as Role,
           mfaEnabled: token.mfaEnabled as boolean,
           mfaVerified: token.mfaVerified as boolean,
+          mustChangePassword: (token.mustChangePassword as boolean) ?? false,
         },
       }
     },

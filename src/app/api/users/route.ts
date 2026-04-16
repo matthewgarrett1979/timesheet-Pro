@@ -1,6 +1,6 @@
 /**
- * GET  /api/users   — ADMIN: list all users; MANAGER: returns self only
- * POST /api/users   — ADMIN only: create a new user
+ * GET  /api/users   — ADMIN: list all users; others: returns self only
+ * POST /api/users   — ADMIN only: create a new user with auto-generated temp password
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -11,12 +11,12 @@ import { audit, getClientIp } from "@/lib/audit"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { AuditAction, Role } from "@prisma/client"
 import { z } from "zod"
+import { randomBytes } from "crypto"
 
 const createSchema = z.object({
   name: z.string().trim().min(1).max(200),
   email: z.string().email(),
-  password: z.string().min(12, "Password must be at least 12 characters"),
-  role: z.enum(["ADMIN", "MANAGER"]).default("MANAGER"),
+  role: z.enum(["ADMIN", "MANAGER", "USER"]).default("USER"),
 })
 
 export async function GET(req: NextRequest) {
@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
       where: { id: session.user.id },
       select: {
         id: true, email: true, name: true, role: true,
-        mfaEnabled: true, createdAt: true, updatedAt: true,
+        mfaEnabled: true, mustChangePassword: true, createdAt: true, updatedAt: true,
       },
     })
     return NextResponse.json([user])
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
     select: {
       id: true, email: true, name: true, role: true,
       mfaEnabled: true, failedLogins: true, lockedUntil: true,
-      createdAt: true, updatedAt: true,
+      mustChangePassword: true, createdAt: true, updatedAt: true,
     },
     orderBy: { createdAt: "asc" },
   })
@@ -75,7 +75,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Email already in use" }, { status: 409 })
   }
 
-  const passwordHash = await hashPassword(body.password)
+  // Auto-generate a secure temporary password
+  const tempPassword = randomBytes(12).toString("base64")
+  const passwordHash = await hashPassword(tempPassword)
 
   const user = await db.user.create({
     data: {
@@ -83,10 +85,11 @@ export async function POST(req: NextRequest) {
       email: body.email.toLowerCase(),
       passwordHash,
       role: body.role as Role,
+      mustChangePassword: true,
     },
     select: {
       id: true, email: true, name: true, role: true,
-      mfaEnabled: true, createdAt: true,
+      mfaEnabled: true, mustChangePassword: true, createdAt: true,
     },
   })
 
@@ -101,5 +104,6 @@ export async function POST(req: NextRequest) {
     success: true,
   })
 
-  return NextResponse.json(user, { status: 201 })
+  // Return tempPassword once — it is never stored in plaintext
+  return NextResponse.json({ ...user, tempPassword }, { status: 201 })
 }

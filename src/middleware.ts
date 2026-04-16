@@ -24,10 +24,21 @@ const PUBLIC_PATHS = [
 ]
 
 // Routes restricted to ADMIN role
-const ADMIN_PATHS = ["/admin", "/api/audit-log"]
+const ADMIN_PATHS = ["/admin", "/api/audit-log", "/settings/users", "/settings/audit"]
+
+// Routes USER role cannot access (admin/manager only)
+const MANAGER_PATHS = [
+  "/clients",
+  "/invoices",
+  "/approvals",
+  "/api/clients",
+  "/api/invoices",
+  "/api/approvals",
+]
 
 const MFA_PATH = "/mfa"
 const LOGIN_PATH = "/login"
+const CHANGE_PASSWORD_PATH = "/settings/change-password"
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -69,10 +80,24 @@ export async function middleware(req: NextRequest) {
       mfaUrl.pathname = MFA_PATH
       response = NextResponse.redirect(mfaUrl)
     } else if (
+      token.mustChangePassword &&
+      pathname !== CHANGE_PASSWORD_PATH
+    ) {
+      // Must change password before accessing anything else
+      const cpUrl = req.nextUrl.clone()
+      cpUrl.pathname = CHANGE_PASSWORD_PATH
+      response = NextResponse.redirect(cpUrl)
+    } else if (
       ADMIN_PATHS.some((p) => pathname.startsWith(p)) &&
       token.role !== "ADMIN"
     ) {
       // Not an admin — return 403
+      response = new NextResponse("Forbidden", { status: 403 })
+    } else if (
+      token.role === "USER" &&
+      MANAGER_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/") || pathname.startsWith(p + "?"))
+    ) {
+      // USER role cannot access manager/admin-only paths
       response = new NextResponse("Forbidden", { status: 403 })
     } else {
       response = NextResponse.next()

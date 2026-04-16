@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import Link from "next/link"
 
 interface Client {
   id: string
@@ -112,6 +113,12 @@ export default function ProjectsPage() {
                     >
                       Edit
                     </button>
+                    <Link
+                      href={`/projects/${p.id}`}
+                      className="text-sm text-blue-600 hover:underline"
+                    >
+                      Team
+                    </Link>
                     <button
                       onClick={() => toggleActive(p)}
                       className="text-sm text-gray-400 hover:text-gray-700"

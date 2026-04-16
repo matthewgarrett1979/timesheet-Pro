@@ -1,6 +1,6 @@
 /**
  * GET   /api/users/[id]  — self or ADMIN: fetch user
- * PATCH /api/users/[id]  — self: update name/password; ADMIN: also update role
+ * PATCH /api/users/[id]  — self: update name/password; ADMIN: also update role/unlock
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -14,12 +14,11 @@ import { z } from "zod"
 
 const patchSchema = z.object({
   name: z.string().trim().min(1).max(200).optional(),
-  // Password change requires current password
+  // Password change requires current password (unless admin resetting for someone else)
   currentPassword: z.string().optional(),
-  newPassword: z.string().min(12).optional(),
-  // ADMIN-only field
-  role: z.enum(["ADMIN", "MANAGER"]).optional(),
-  // ADMIN: unlock account
+  newPassword: z.string().min(14, "Password must be at least 14 characters").optional(),
+  // ADMIN-only fields
+  role: z.enum(["ADMIN", "MANAGER", "USER"]).optional(),
   unlock: z.boolean().optional(),
 }).refine(
   (d) => !d.newPassword || d.currentPassword,
@@ -51,7 +50,7 @@ export async function GET(
     select: {
       id: true, email: true, name: true, role: true,
       mfaEnabled: true, failedLogins: true, lockedUntil: true,
-      createdAt: true, updatedAt: true,
+      mustChangePassword: true, createdAt: true, updatedAt: true,
     },
   })
 
@@ -83,7 +82,7 @@ export async function PATCH(
   let body: z.infer<typeof patchSchema>
   try {
     body = patchSchema.parse(await req.json())
-  } catch (err) {
+  } catch {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
   }
 
@@ -112,13 +111,13 @@ export async function PATCH(
     where: { id },
     data: {
       ...(body.name ? { name: body.name } : {}),
-      ...(passwordHash ? { passwordHash } : {}),
+      ...(passwordHash ? { passwordHash, mustChangePassword: false } : {}),
       ...(body.role && isAdmin ? { role: body.role as Role } : {}),
       ...(body.unlock && isAdmin ? { failedLogins: 0, lockedUntil: null } : {}),
     },
     select: {
       id: true, email: true, name: true, role: true,
-      mfaEnabled: true, createdAt: true, updatedAt: true,
+      mfaEnabled: true, mustChangePassword: true, createdAt: true, updatedAt: true,
     },
   })
 

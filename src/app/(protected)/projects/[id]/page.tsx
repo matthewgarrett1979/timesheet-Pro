@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 import Link from "next/link"
 
 interface Phase {
@@ -38,6 +39,21 @@ interface TimeEntry {
   projectId: string | null
 }
 
+interface TeamAssignment {
+  id: string
+  userId: string
+  projectId: string
+  assignedAt: string
+  user: { id: string; name: string; email: string; role: string }
+}
+
+interface TeamUser {
+  id: string
+  name: string
+  email: string
+  role: string
+}
+
 const BILLING_TYPE_LABELS: Record<string, string> = {
   TIME_AND_MATERIALS: "T&M",
   DRAWDOWN: "Drawdown",
@@ -69,12 +85,21 @@ export default function ProjectDetailPage() {
   const params = useParams()
   const id = params.id as string
   const router = useRouter()
+  const { data: session } = useSession()
 
   const [project, setProject] = useState<Project | null>(null)
   const [phases, setPhases] = useState<Phase[]>([])
   const [entries, setEntries] = useState<TimeEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
+
+  // Team management state
+  const [teamAssignments, setTeamAssignments] = useState<TeamAssignment[]>([])
+  const [allUsers, setAllUsers] = useState<TeamUser[]>([])
+  const [confirmRemoveUser, setConfirmRemoveUser] = useState<TeamAssignment | null>(null)
+
+  const isAdmin = session?.user?.role === "ADMIN"
+  const isManager = session?.user?.role === "MANAGER" || isAdmin
 
   // Add phase form
   const [showAddPhase, setShowAddPhase] = useState(false)
@@ -130,10 +155,40 @@ export default function ProjectDetailPage() {
         const entriesData = await entriesRes.json()
         setEntries(Array.isArray(entriesData) ? entriesData : [])
       }
+
+      // Load team assignments
+      const assignRes = await fetch(`/api/projects/${id}/users`)
+      if (assignRes.ok) setTeamAssignments(await assignRes.json())
+
+      if (isAdmin) {
+        const usersRes = await fetch("/api/users")
+        if (usersRes.ok) setAllUsers(await usersRes.json())
+      }
     } catch {
       setError("Failed to load project.")
     }
     setLoading(false)
+  }
+
+  async function assignTeamUser(userId: string) {
+    await fetch(`/api/projects/${id}/users`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId }),
+    })
+    const res = await fetch(`/api/projects/${id}/users`)
+    if (res.ok) setTeamAssignments(await res.json())
+  }
+
+  async function removeTeamUser(assignment: TeamAssignment) {
+    await fetch(`/api/projects/${id}/users`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: assignment.userId }),
+    })
+    setConfirmRemoveUser(null)
+    const res = await fetch(`/api/projects/${id}/users`)
+    if (res.ok) setTeamAssignments(await res.json())
   }
 
   useEffect(() => {
@@ -630,6 +685,95 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Team section — ADMIN/MANAGER only */}
+      {isManager && (
+        <div className="card p-6 mt-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-gray-900">Team</h2>
+            <span className="text-sm text-gray-500">{teamAssignments.length} member{teamAssignments.length !== 1 ? "s" : ""}</span>
+          </div>
+
+          {teamAssignments.length === 0 ? (
+            <p className="text-sm text-gray-400 mb-3">No users assigned to this project yet.</p>
+          ) : (
+            <table className="data-table mb-4">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Assigned</th>
+                  {isAdmin && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {teamAssignments.map((a) => (
+                  <tr key={a.id}>
+                    <td className="font-medium text-gray-900">{a.user.name}</td>
+                    <td className="text-gray-500 text-xs">{a.user.email}</td>
+                    <td>
+                      <span className={`badge ${
+                        a.user.role === "ADMIN" ? "badge-admin" :
+                        a.user.role === "MANAGER" ? "badge-manager" :
+                        "badge-draft"
+                      }`}>
+                        {a.user.role}
+                      </span>
+                    </td>
+                    <td className="text-gray-400">{new Date(a.assignedAt).toLocaleDateString("en-GB")}</td>
+                    {isAdmin && (
+                      <td>
+                        <button onClick={() => setConfirmRemoveUser(a)} className="text-sm text-red-500 hover:underline">
+                          Remove
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {isAdmin && (
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600 shrink-0">Add user:</label>
+              <select
+                className="input text-sm w-72"
+                defaultValue=""
+                onChange={(e) => { if (e.target.value) { assignTeamUser(e.target.value); e.target.value = "" } }}
+              >
+                <option value="">Select a user…</option>
+                {allUsers
+                  .filter((u) => !teamAssignments.some((a) => a.userId === u.id))
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
+                  ))}
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Confirm remove team member */}
+      {confirmRemoveUser && (
+        <div className="modal-backdrop" onClick={() => setConfirmRemoveUser(null)}>
+          <div className="modal-box max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold">Remove user?</h2>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <p className="text-sm text-gray-700">
+                Remove <span className="font-medium">{confirmRemoveUser.user.name}</span> from this project?
+              </p>
+              <div className="flex justify-end gap-3">
+                <button onClick={() => setConfirmRemoveUser(null)} className="btn-secondary">Cancel</button>
+                <button onClick={() => removeTeamUser(confirmRemoveUser)} className="btn-danger">Remove</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

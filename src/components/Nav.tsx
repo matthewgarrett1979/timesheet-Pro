@@ -7,20 +7,27 @@ import { useState, useEffect } from "react"
 
 interface NavUser { id: string; name?: string | null; email?: string | null; role: string }
 
-const NAV_ITEMS = [
+interface NavItem {
+  href: string
+  label: string
+  roles?: string[]
+  adminOnly?: boolean
+}
+
+const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard",    label: "Dashboard" },
   { href: "/time-entries", label: "Time Entries" },
   { href: "/timesheets",   label: "Timesheets" },
-  { href: "/clients",      label: "Clients" },
+  { href: "/clients",      label: "Clients",   roles: ["ADMIN", "MANAGER"] },
   { href: "/projects",     label: "Projects" },
   { href: "/expenses",     label: "Expenses" },
-  { href: "/invoices",     label: "Invoices" },
-  { href: "/approvals",    label: "Approvals" },
-  { href: "/reports",      label: "Reports", adminOnly: true },
+  { href: "/invoices",     label: "Invoices",  roles: ["ADMIN", "MANAGER"] },
+  { href: "/approvals",    label: "Approvals", roles: ["ADMIN", "MANAGER"] },
+  { href: "/reports",      label: "Reports",   adminOnly: true },
 ]
 
-const SETTINGS_ITEMS = [
-  { href: "/settings",                    label: "Profile & Security",  roles: ["ADMIN", "MANAGER"] },
+const SETTINGS_ITEMS: NavItem[] = [
+  { href: "/settings",                    label: "Profile & Security" },
   { href: "/settings/appearance",         label: "Appearance",          roles: ["ADMIN", "MANAGER"] },
   { href: "/settings/categories",         label: "Time Categories",     roles: ["ADMIN"] },
   { href: "/settings/notifications",      label: "Notifications",       roles: ["ADMIN"] },
@@ -67,6 +74,12 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
 
   const visibleNavItems = NAV_ITEMS.filter((item) => {
     if (item.adminOnly) return user.role === "ADMIN"
+    if (item.roles) return item.roles.includes(user.role)
+    return true
+  })
+
+  const visibleSettingsItems = SETTINGS_ITEMS.filter((item) => {
+    if (item.roles) return item.roles.includes(user.role)
     return true
   })
 
@@ -105,7 +118,7 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
           <p className="px-3 mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
             Settings
           </p>
-          {SETTINGS_ITEMS.filter((i) => i.roles.includes(user.role)).map((item) => (
+          {visibleSettingsItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -127,7 +140,11 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
         <div className="mb-2">
           <p className="text-sm font-medium text-white truncate">{user.name}</p>
           <p className="text-xs text-slate-400 truncate">{user.email}</p>
-          <span className={`badge mt-1 ${user.role === "ADMIN" ? "badge-admin" : "badge-manager"}`}>
+          <span className={`badge mt-1 ${
+            user.role === "ADMIN" ? "badge-admin" :
+            user.role === "MANAGER" ? "badge-manager" :
+            "badge-draft"
+          }`}>
             {user.role}
           </span>
         </div>

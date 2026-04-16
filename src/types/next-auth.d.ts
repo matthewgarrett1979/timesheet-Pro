@@ -7,6 +7,7 @@ declare module "next-auth/jwt" {
     role: Role
     mfaEnabled: boolean
     mfaVerified: boolean
+    mustChangePassword: boolean
   }
 }
 
@@ -17,6 +18,7 @@ declare module "next-auth" {
       role: Role
       mfaEnabled: boolean
       mfaVerified: boolean
+      mustChangePassword: boolean
     } & DefaultSession["user"]
   }
 
@@ -24,5 +26,6 @@ declare module "next-auth" {
     id: string
     role: Role
     mfaEnabled: boolean
+    mustChangePassword: boolean
   }
 }

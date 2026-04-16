@@ -19,6 +19,10 @@ export default async function ProtectedLayout({
     redirect("/mfa")
   }
 
+  if (session.user.mustChangePassword) {
+    redirect("/settings/change-password")
+  }
+
   return (
     <div
       className="flex h-screen overflow-hidden"
