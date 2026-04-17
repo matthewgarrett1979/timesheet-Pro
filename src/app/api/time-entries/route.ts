@@ -25,14 +25,15 @@ import { db } from "@/lib/db"
 import { checkBudgetAlert } from "@/lib/budget-alert"
 
 const createSchema = z.object({
-  date:        z.string().datetime({ message: "date must be ISO-8601" }),
-  clientId:    z.string().cuid("Invalid client ID"),
-  projectId:   z.string().cuid().nullish(),
-  phaseId:     z.string().cuid().nullish(),
-  categoryId:  z.string().cuid().nullish(),
-  hours:       z.number().min(0.25).max(24),
-  description: z.string().trim().min(1).max(1000),
-  isBillable:  z.boolean().default(true),
+  date:            z.string().datetime({ message: "date must be ISO-8601" }),
+  clientId:        z.string().cuid("Invalid client ID"),
+  projectId:       z.string().cuid().nullish(),
+  phaseId:         z.string().cuid().nullish(),
+  categoryId:      z.string().cuid().nullish(),
+  purchaseOrderId: z.string().cuid().nullish(),
+  hours:           z.number().min(0.25).max(24),
+  description:     z.string().trim().min(1).max(1000),
+  isBillable:      z.boolean().default(true),
 })
 
 export async function GET(req: NextRequest) {
@@ -100,21 +101,23 @@ export async function POST(req: NextRequest) {
 
   const entry = await db.timeEntry.create({
     data: {
-      date:        new Date(body.date),
-      clientId:    body.clientId,
-      projectId:   body.projectId  ?? null,
-      phaseId:     body.phaseId    ?? null,
-      categoryId:  body.categoryId ?? null,
-      managerId:   session.user.id,
-      hours:       body.hours,
-      description: body.description,
-      isBillable:  body.isBillable,
+      date:            new Date(body.date),
+      clientId:        body.clientId,
+      projectId:       body.projectId       ?? null,
+      phaseId:         body.phaseId         ?? null,
+      categoryId:      body.categoryId      ?? null,
+      purchaseOrderId: body.purchaseOrderId ?? null,
+      managerId:       session.user.id,
+      hours:           body.hours,
+      description:     body.description,
+      isBillable:      body.isBillable,
     },
     include: {
-      client:   { select: { id: true, name: true } },
-      project:  { select: { id: true, name: true } },
-      phase:    { select: { id: true, name: true } },
-      category: { select: { id: true, name: true, colour: true } },
+      client:        { select: { id: true, name: true } },
+      project:       { select: { id: true, name: true } },
+      phase:         { select: { id: true, name: true } },
+      category:      { select: { id: true, name: true, colour: true } },
+      purchaseOrder: { select: { id: true, poNumber: true, status: true } },
     },
   })
 

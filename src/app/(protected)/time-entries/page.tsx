@@ -9,6 +9,15 @@ import { useRouter, useSearchParams } from "next/navigation"
 interface Client { id: string; name: string; reference: string | null; defaultRate: string | null }
 interface Project { id: string; name: string; clientId: string; active: boolean; rateOverride: string | null; client: { id: string; name: string } }
 interface Phase { id: string; name: string; projectId: string }
+interface PurchaseOrder {
+  id: string
+  poNumber: string
+  sowReference: string | null
+  status: "ACTIVE" | "EXPIRED" | "CANCELLED" | "COMPLETED"
+  expiryDate: string | null
+  value: string | null
+  currency: string
+}
 interface Category { id: string; name: string; colour: string; isBillable: boolean }
 interface TimeEntry {
   id: string; date: string; hours: string | number; description: string
@@ -94,6 +103,7 @@ function TimeEntriesContent() {
   const [fProjectId,   setFProjectId]  = useState("")
   const [fPhaseId,     setFPhaseId]    = useState("")
   const [fCategoryId,  setFCategoryId] = useState("")
+  const [fPoId,        setFPoId]       = useState("")
   const [fHours,       setFHours]      = useState("1.00")
   const [fDesc,        setFDesc]       = useState("")
   const [fBillable,    setFBillable]   = useState(true)
@@ -101,6 +111,7 @@ function TimeEntriesContent() {
   const [fError,       setFError]      = useState("")
   const [clientProjects, setClientProjects] = useState<Project[]>([])
   const [phases,          setPhases]        = useState<Phase[]>([])
+  const [projectPos,      setProjectPos]    = useState<PurchaseOrder[]>([])
 
   // Filters
   const [filterClient,   setFilterClient]   = useState("")
@@ -227,6 +238,16 @@ function TimeEntriesContent() {
     setFPhaseId("")
   }, [fProjectId])
 
+  // Load purchase orders when form project changes
+  useEffect(() => {
+    if (!fProjectId) { setProjectPos([]); setFPoId(""); return }
+    fetch(`/api/projects/${fProjectId}/purchase-orders`)
+      .then(r => r.ok ? r.json() : [])
+      .then((data) => setProjectPos(Array.isArray(data) ? data : []))
+      .catch(() => setProjectPos([]))
+    setFPoId("")
+  }, [fProjectId])
+
   // ---------------------------------------------------------------------------
   // Edit project/phase loading
   // ---------------------------------------------------------------------------
@@ -255,13 +276,14 @@ function TimeEntriesContent() {
         projectId: fProjectId || null,
         phaseId: fPhaseId || null,
         categoryId: fCategoryId || null,
+        purchaseOrderId: fPoId || null,
         hours: parseFloat(fHours),
         description: fDesc,
         isBillable: fBillable,
       }),
     })
     if (res.ok) {
-      setFDesc(""); setFHours("1.00"); setFPhaseId("")
+      setFDesc(""); setFHours("1.00"); setFPhaseId(""); setFPoId("")
       await loadEntries()
     } else {
       const d = await res.json()
@@ -417,6 +439,40 @@ function TimeEntriesContent() {
         <h2 className="text-sm font-semibold text-gray-700 mb-3">Quick Entry</h2>
         <form onSubmit={handleCreate} className="space-y-3">
           {fError && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{fError}</p>}
+          {fProjectId && projectPos.length === 0 && (
+            <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              No purchase orders recorded for this project. Time can still be logged — notify your manager to add a PO.
+            </p>
+          )}
+          {(() => {
+            const po = projectPos.find(p => p.id === fPoId)
+            if (!po) return null
+            if (po.status === "EXPIRED" || po.status === "CANCELLED") {
+              return (
+                <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded px-3 py-2">
+                  Selected PO is {po.status.toLowerCase()}. New time cannot be allocated against it.
+                </p>
+              )
+            }
+            if (po.expiryDate) {
+              const days = Math.floor((new Date(po.expiryDate).getTime() - Date.now()) / 86_400_000)
+              if (days < 0) {
+                return (
+                  <p className="text-sm text-red-800 bg-red-50 border border-red-200 rounded px-3 py-2">
+                    Warning: Purchase Order {po.poNumber} expired {Math.abs(days)} day(s) ago.
+                  </p>
+                )
+              }
+              if (days <= 30) {
+                return (
+                  <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                    Purchase Order {po.poNumber} expires in {days} day(s).
+                  </p>
+                )
+              }
+            }
+            return null
+          })()}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label className="label">Date *</label>
@@ -442,6 +498,19 @@ function TimeEntriesContent() {
                 <select className="input" value={fPhaseId} onChange={e => setFPhaseId(e.target.value)}>
                   <option value="">No phase</option>
                   {phases.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+            )}
+            {fProjectId && projectPos.length > 0 && (
+              <div>
+                <label className="label">Purchase Order</label>
+                <select className="input" value={fPoId} onChange={e => setFPoId(e.target.value)}>
+                  <option value="">No PO</option>
+                  {projectPos.map(po => (
+                    <option key={po.id} value={po.id} disabled={po.status !== "ACTIVE"}>
+                      {po.poNumber}{po.sowReference ? ` / ${po.sowReference}` : ""}{po.status !== "ACTIVE" ? ` (${po.status})` : ""}
+                    </option>
+                  ))}
                 </select>
               </div>
             )}
