@@ -56,6 +56,13 @@ enum InvoiceStatus {
   PAID
 }
 
+enum PurchaseOrderStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  COMPLETED
+}
+
 enum ExpenseStatus {
   DRAFT
   SUBMITTED
@@ -105,6 +112,9 @@ enum AuditAction {
   PARTIALLY_APPROVED
   RESEND_EMAIL
   TIMESHEET_DELETED
+  PO_CREATED
+  PO_UPDATED
+  PO_DELETED
 }
 
 // ---------------------------------------------------------------------------
@@ -137,14 +147,15 @@ model User {
   updatedAt     DateTime  @updatedAt
 
   // Relations
-  clients        Client[]
-  timesheets     Timesheet[]
-  timeEntries    TimeEntry[]
-  projects       Project[]
-  expenses       Expense[]
-  auditLogs      AuditLog[]
-  approvalTokens ApprovalToken[]
-  userProjects   UserProject[]
+  clients         Client[]
+  timesheets      Timesheet[]
+  timeEntries     TimeEntry[]
+  projects        Project[]
+  expenses        Expense[]
+  auditLogs       AuditLog[]
+  approvalTokens  ApprovalToken[]
+  userProjects    UserProject[]
+  purchaseOrders  PurchaseOrder[]
 
   // NextAuth
   accounts       Account[]
@@ -214,9 +225,10 @@ model Project {
   budgetValue      Decimal?    @db.Decimal(10, 2)
   drawdownRate     Decimal?    @db.Decimal(10, 2)
 
-  phases       ProjectPhase[]
-  timeEntries  TimeEntry[]
-  userProjects UserProject[]
+  phases          ProjectPhase[]
+  timeEntries     TimeEntry[]
+  userProjects    UserProject[]
+  purchaseOrders  PurchaseOrder[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -253,12 +265,47 @@ model ProjectPhase {
   endDate          DateTime?   @db.Date
   status           PhaseStatus @default(ACTIVE)
 
-  timeEntries TimeEntry[]
+  timeEntries    TimeEntry[]
+  purchaseOrders PurchaseOrder[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([projectId])
+}
+
+model PurchaseOrder {
+  id               String              @id @default(cuid())
+  projectId        String
+  project          Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  phaseId          String?
+  phase            ProjectPhase?       @relation(fields: [phaseId], references: [id], onDelete: SetNull)
+  poNumber         String
+  sowReference     String?
+  description      String?
+  value            Decimal?            @db.Decimal(10, 2)
+  currency         String              @default("GBP")
+  issueDate        DateTime?           @db.Date
+  expiryDate       DateTime?           @db.Date
+  status           PurchaseOrderStatus @default(ACTIVE)
+  sowSigned        Boolean             @default(false)
+  poSigned         Boolean             @default(false)
+  documentUrl      String?
+  documentFileName String?
+  notes            String?
+  createdById      String
+  createdBy        User                @relation(fields: [createdById], references: [id])
+
+  timeEntries TimeEntry[]
+  invoices    Invoice[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([phaseId])
+  @@index([createdById])
+  @@index([status])
 }
 
 model TimeCategory {
@@ -317,14 +364,16 @@ model TimeEntry {
   category    TimeCategory?   @relation(fields: [categoryId], references: [id])
   managerId   String?
   manager     User?           @relation(fields: [managerId], references: [id])
-  timesheetId String?
-  timesheet   Timesheet?      @relation(fields: [timesheetId], references: [id], onDelete: SetNull)
-  hours       Decimal         @db.Decimal(5, 2)
-  description String
-  isBillable  Boolean         @default(true)
-  status      TimeEntryStatus @default(DRAFT)
-  invoiced    Boolean         @default(false)
-  receiptPath String?
+  timesheetId     String?
+  timesheet       Timesheet?      @relation(fields: [timesheetId], references: [id], onDelete: SetNull)
+  purchaseOrderId String?
+  purchaseOrder   PurchaseOrder?  @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+  hours           Decimal         @db.Decimal(5, 2)
+  description     String
+  isBillable      Boolean         @default(true)
+  status          TimeEntryStatus @default(DRAFT)
+  invoiced        Boolean         @default(false)
+  receiptPath     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -333,6 +382,7 @@ model TimeEntry {
   @@index([clientId])
   @@index([projectId])
   @@index([timesheetId])
+  @@index([purchaseOrderId])
   @@index([date])
 }
 
@@ -384,15 +434,18 @@ model Invoice {
   xeroInvoiceId       String?
   xeroAccessTokenEnc  String?       // AES-256-GCM encrypted
   xeroRefreshTokenEnc String?       // AES-256-GCM encrypted
-  amount              Decimal       @db.Decimal(10, 2)
-  currency            String        @default("GBP")
-  status              InvoiceStatus @default(DRAFT)
+  amount              Decimal        @db.Decimal(10, 2)
+  currency            String         @default("GBP")
+  status              InvoiceStatus  @default(DRAFT)
+  purchaseOrderId     String?
+  purchaseOrder       PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([managerId])
   @@index([clientId])
+  @@index([purchaseOrderId])
 }
 
 // Global appearance / theme settings — singleton row with id = 'global'

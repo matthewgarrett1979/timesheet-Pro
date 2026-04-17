@@ -38,10 +38,11 @@ export async function listClientsForUser(userId: string, role: Role) {
 // ---------------------------------------------------------------------------
 
 const TIME_ENTRY_INCLUDE = {
-  client:   { select: { id: true, name: true, reference: true, defaultRate: true } },
-  project:  { select: { id: true, name: true, rateOverride: true, billingType: true } },
-  phase:    { select: { id: true, name: true } },
-  category: { select: { id: true, name: true, colour: true, isBillable: true } },
+  client:        { select: { id: true, name: true, reference: true, defaultRate: true } },
+  project:       { select: { id: true, name: true, rateOverride: true, billingType: true } },
+  phase:         { select: { id: true, name: true } },
+  category:      { select: { id: true, name: true, colour: true, isBillable: true } },
+  purchaseOrder: { select: { id: true, poNumber: true, status: true } },
 } as const
 
 export async function getTimeEntryForUser(
@@ -289,6 +290,17 @@ export async function listInvoicesForUser(userId: string, role: Role) {
           invoicePaymentTerms: true,
           invoiceCurrency: true,
           defaultRate: true,
+        },
+      },
+      purchaseOrder: {
+        select: {
+          id: true,
+          poNumber: true,
+          sowReference: true,
+          value: true,
+          currency: true,
+          status: true,
+          expiryDate: true,
         },
       },
     },

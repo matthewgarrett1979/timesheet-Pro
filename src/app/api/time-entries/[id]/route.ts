@@ -14,13 +14,14 @@ import { AuditAction, Role, TimeEntryStatus } from "@prisma/client"
 import { z } from "zod"
 
 const patchSchema = z.object({
-  date:        z.string().datetime().optional(),
-  projectId:   z.string().cuid().nullish(),
-  phaseId:     z.string().cuid().nullish(),
-  categoryId:  z.string().cuid().nullish(),
-  hours:       z.number().min(0.25).max(24).optional(),
-  description: z.string().trim().min(1).max(1000).optional(),
-  isBillable:  z.boolean().optional(),
+  date:            z.string().datetime().optional(),
+  projectId:       z.string().cuid().nullish(),
+  phaseId:         z.string().cuid().nullish(),
+  categoryId:      z.string().cuid().nullish(),
+  purchaseOrderId: z.string().cuid().nullish(),
+  hours:           z.number().min(0.25).max(24).optional(),
+  description:     z.string().trim().min(1).max(1000).optional(),
+  isBillable:      z.boolean().optional(),
 })
 
 export async function GET(
@@ -86,19 +87,21 @@ export async function PATCH(
   const updated = await db.timeEntry.update({
     where: { id },
     data: {
-      ...(body.date        !== undefined ? { date: new Date(body.date) } : {}),
-      ...(body.projectId   !== undefined ? { projectId:  body.projectId  ?? null } : {}),
-      ...(body.phaseId     !== undefined ? { phaseId:    body.phaseId    ?? null } : {}),
-      ...(body.categoryId  !== undefined ? { categoryId: body.categoryId ?? null } : {}),
-      ...(body.hours       !== undefined ? { hours:       body.hours }       : {}),
-      ...(body.description !== undefined ? { description: body.description } : {}),
-      ...(body.isBillable  !== undefined ? { isBillable:  body.isBillable }  : {}),
+      ...(body.date            !== undefined ? { date: new Date(body.date) } : {}),
+      ...(body.projectId       !== undefined ? { projectId:       body.projectId       ?? null } : {}),
+      ...(body.phaseId         !== undefined ? { phaseId:         body.phaseId         ?? null } : {}),
+      ...(body.categoryId      !== undefined ? { categoryId:      body.categoryId      ?? null } : {}),
+      ...(body.purchaseOrderId !== undefined ? { purchaseOrderId: body.purchaseOrderId ?? null } : {}),
+      ...(body.hours           !== undefined ? { hours:           body.hours }                   : {}),
+      ...(body.description     !== undefined ? { description:     body.description }             : {}),
+      ...(body.isBillable      !== undefined ? { isBillable:      body.isBillable }              : {}),
     },
     include: {
-      client:   { select: { id: true, name: true } },
-      project:  { select: { id: true, name: true } },
-      phase:    { select: { id: true, name: true } },
-      category: { select: { id: true, name: true, colour: true } },
+      client:        { select: { id: true, name: true } },
+      project:       { select: { id: true, name: true } },
+      phase:         { select: { id: true, name: true } },
+      category:      { select: { id: true, name: true, colour: true } },
+      purchaseOrder: { select: { id: true, poNumber: true, status: true } },
     },
   })
 

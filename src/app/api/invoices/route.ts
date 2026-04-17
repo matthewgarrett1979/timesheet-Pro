@@ -16,12 +16,13 @@ import { AuditAction, Role, TimesheetStatus } from "@prisma/client"
 import { z } from "zod"
 
 const createSchema = z.object({
-  clientId: z.string().cuid(),
-  timesheetIds: z.array(z.string().cuid()).min(1).max(50),
-  amount: z.number().positive(),
-  currency: z.string().length(3).default("GBP"),
+  clientId:        z.string().cuid(),
+  timesheetIds:    z.array(z.string().cuid()).min(1).max(50),
+  amount:          z.number().positive(),
+  currency:        z.string().length(3).default("GBP"),
+  purchaseOrderId: z.string().cuid().nullish(),
   // Xero tokens are optional — supply if pushing to Xero at the same time
-  xeroAccessToken: z.string().optional(),
+  xeroAccessToken:  z.string().optional(),
   xeroRefreshToken: z.string().optional(),
 })
 
@@ -96,11 +97,12 @@ export async function POST(req: NextRequest) {
   const invoice = await db.$transaction(async (tx) => {
     const inv = await tx.invoice.create({
       data: {
-        clientId: body.clientId,
-        managerId: session.user.id,
-        timesheetIds: body.timesheetIds,
-        amount: body.amount,
-        currency: body.currency,
+        clientId:        body.clientId,
+        managerId:       session.user.id,
+        timesheetIds:    body.timesheetIds,
+        amount:          body.amount,
+        currency:        body.currency,
+        purchaseOrderId: body.purchaseOrderId ?? null,
         xeroAccessTokenEnc,
         xeroRefreshTokenEnc,
       },
