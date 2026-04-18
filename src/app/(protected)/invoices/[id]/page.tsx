@@ -61,7 +61,7 @@ export default async function InvoicePreviewPage({ params }: Props) {
     : []
 
   const dueDate = new Date(invoice.createdAt)
-  const paymentTerms = invoice.client.invoicePaymentTerms ?? settings?.defaultPaymentTerms ?? 30
+  const paymentTerms = invoice.client.invoicePaymentTerms ?? 30
   dueDate.setDate(dueDate.getDate() + paymentTerms)
 
   const invoiceNumber = `${settings?.invoicePrefix ?? "INV"}-${id.slice(-6).toUpperCase()}`
