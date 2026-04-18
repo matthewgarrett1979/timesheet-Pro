@@ -115,6 +115,9 @@ enum AuditAction {
   PO_CREATED
   PO_UPDATED
   PO_DELETED
+  RESOURCE_ALLOCATED
+  RESOURCE_UPDATED
+  RESOURCE_DEALLOCATED
 }
 
 // ---------------------------------------------------------------------------
