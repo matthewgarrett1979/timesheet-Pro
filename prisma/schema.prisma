@@ -464,6 +464,27 @@ model AppSettings {
   reminderDayOfWeek    Int     @default(5)      // 1=Mon … 7=Sun (ISO weekday)
   reminderTime         String  @default("17:00") // HH:MM UTC
 
+  // Company / invoice / bank settings
+  companyName          String  @default("")
+  companyLegalName     String?
+  companyAddress       String  @default("")
+  companyEmail         String  @default("")
+  companyPhone         String  @default("")
+  companyWebsite       String?
+  vatNumber            String?
+  vatRegistered        Boolean @default(false)
+  companyRegNumber     String?
+  logoUrl              String?
+  bankName             String?
+  accountName          String?
+  sortCode             String?
+  accountNumber        String?
+  iban                 String?
+  swiftBic             String?
+  invoicePrefix        String  @default("INV")
+  nextInvoiceNumber    Int     @default(1)
+  defaultPaymentTerms  Int     @default(30)
+
   updatedAt       DateTime @updatedAt
 }
 
