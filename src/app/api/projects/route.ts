@@ -45,7 +45,26 @@ export async function GET(req: NextRequest) {
     }
   )
 
-  return NextResponse.json(projects)
+  // Add hours-logged aggregate for budget health display
+  const ids = projects.map((p) => p.id)
+  const hoursByProject = ids.length
+    ? await db.timeEntry.groupBy({
+        by: ["projectId"],
+        where: { projectId: { in: ids } },
+        _sum: { hours: true },
+      })
+    : []
+
+  const hoursMap = Object.fromEntries(
+    hoursByProject.map((r) => [r.projectId, Number(r._sum.hours ?? 0)])
+  )
+
+  const enriched = projects.map((p) => ({
+    ...p,
+    hoursLogged: hoursMap[p.id] ?? 0,
+  }))
+
+  return NextResponse.json(enriched)
 }
 
 export async function POST(req: NextRequest) {

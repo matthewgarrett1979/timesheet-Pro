@@ -27,19 +27,24 @@ const NAV_ITEMS: NavItem[] = [
 ]
 
 const SETTINGS_ITEMS: NavItem[] = [
-  { href: "/settings",                    label: "Profile & Security" },
-  { href: "/settings/appearance",         label: "Appearance",          roles: ["ADMIN", "MANAGER"] },
-  { href: "/settings/categories",         label: "Time Categories",     roles: ["ADMIN"] },
-  { href: "/settings/notifications",      label: "Notifications",       roles: ["ADMIN"] },
-  { href: "/settings/users",              label: "Users",               roles: ["ADMIN"] },
-  { href: "/settings/audit",              label: "Audit Log",           roles: ["ADMIN"] },
+  { href: "/settings",                label: "Profile & Security" },
+  { href: "/settings/appearance",     label: "Appearance",      roles: ["ADMIN", "MANAGER"] },
+  { href: "/settings/company",        label: "Company",         roles: ["ADMIN"] },
+  { href: "/settings/categories",     label: "Time Categories", roles: ["ADMIN"] },
+  { href: "/settings/notifications",  label: "Notifications",   roles: ["ADMIN"] },
+  { href: "/settings/users",          label: "Users",           roles: ["ADMIN"] },
+  { href: "/settings/audit",          label: "Audit Log",       roles: ["ADMIN"] },
 ]
 
 export default function Nav({ user, version }: { user: NavUser; version: string }) {
-  const pathname = usePathname()
-  const router = useRouter()
-  const [signingOut, setSigningOut] = useState(false)
-  const [timerRunning, setTimerRunning] = useState(false)
+  const pathname    = usePathname()
+  const router      = useRouter()
+  const [signingOut,    setSigningOut]    = useState(false)
+  const [timerRunning,  setTimerRunning]  = useState(false)
+  const [mobileOpen,    setMobileOpen]    = useState(false)
+
+  // Close mobile menu on route change
+  useEffect(() => { setMobileOpen(false) }, [pathname])
 
   useEffect(() => {
     function checkTimer() {
@@ -55,7 +60,6 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
         setTimerRunning(false)
       }
     }
-
     checkTimer()
     const interval = setInterval(checkTimer, 5000)
     return () => clearInterval(interval)
@@ -83,14 +87,21 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
     return true
   })
 
-  return (
-    <aside
-      className="flex flex-col w-60 min-h-screen text-slate-200 shrink-0"
-      style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
-    >
+  const navContent = (
+    <>
       {/* Logo */}
-      <div className="px-5 py-5 border-b border-white/10">
+      <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
         <span className="text-lg font-bold text-white tracking-tight">Tech Timesheet</span>
+        {/* Close button — mobile only */}
+        <button
+          onClick={() => setMobileOpen(false)}
+          className="md:hidden text-slate-300 hover:text-white p-1 -mr-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+          aria-label="Close menu"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
 
       {/* Main nav */}
@@ -99,7 +110,7 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
           <Link
             key={item.href}
             href={item.href}
-            className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+            className={`flex items-center px-3 py-2.5 rounded-md text-sm font-medium transition-colors min-h-[44px] ${
               isActive(item.href)
                 ? "text-white"
                 : "text-slate-300 hover:bg-white/10 hover:text-white"
@@ -122,7 +133,7 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              className={`flex items-center px-3 py-2.5 rounded-md text-sm font-medium transition-colors min-h-[44px] ${
                 isActive(item.href)
                   ? "text-white"
                   : "text-slate-300 hover:bg-white/10 hover:text-white"
@@ -151,12 +162,57 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
         <button
           onClick={handleSignOut}
           disabled={signingOut}
-          className="w-full text-left text-xs text-slate-400 hover:text-white transition-colors py-1"
+          className="w-full text-left text-xs text-slate-400 hover:text-white transition-colors py-1 min-h-[44px] flex items-center"
         >
           {signingOut ? "Signing out…" : "Sign out"}
         </button>
-        <p className="text-xs text-slate-600 mt-2 select-none">v{version}</p>
+        <p className="text-xs text-slate-600 mt-1 select-none">v{version}</p>
       </div>
-    </aside>
+    </>
+  )
+
+  return (
+    <>
+      {/* Mobile top bar */}
+      <div
+        className="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 py-3 border-b border-white/10"
+        style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
+      >
+        <span className="text-base font-bold text-white tracking-tight">Tech Timesheet</span>
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="text-slate-300 hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center"
+          aria-label="Open menu"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Mobile drawer overlay */}
+      {mobileOpen && (
+        <div
+          className="md:hidden fixed inset-0 z-50 bg-black/50"
+          onClick={() => setMobileOpen(false)}
+        >
+          <aside
+            className="flex flex-col w-72 h-full text-slate-200 shadow-2xl"
+            style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {navContent}
+          </aside>
+        </div>
+      )}
+
+      {/* Desktop sidebar */}
+      <aside
+        className="hidden md:flex flex-col w-60 min-h-screen text-slate-200 shrink-0"
+        style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
+      >
+        {navContent}
+      </aside>
+    </>
   )
 }

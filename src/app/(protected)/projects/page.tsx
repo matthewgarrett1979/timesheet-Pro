@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
+import { useRouter } from "next/navigation"
 
 interface Client {
   id: string
@@ -22,6 +22,7 @@ interface Project {
   budgetHours: number | null
   contingencyHours: number | null
   budgetValue: number | null
+  hoursLogged: number
 }
 
 const BILLING_LABELS: Record<string, string> = {
@@ -30,36 +31,37 @@ const BILLING_LABELS: Record<string, string> = {
   FIXED: "Fixed",
 }
 
+function getHealth(p: Project): { label: string; cls: string } {
+  const budget = p.budgetHours ? Number(p.budgetHours) : null
+  if (!budget) return { label: "No budget", cls: "badge-draft" }
+  const totalBudget = budget + (p.contingencyHours ? Number(p.contingencyHours) : 0)
+  const pct = p.hoursLogged / totalBudget
+  if (pct >= 1)   return { label: "Overrun",  cls: "badge-rejected" }
+  if (pct >= 0.8) return { label: "At risk",  cls: "badge-submitted" }
+  return { label: "On track", cls: "badge-approved" }
+}
+
 export default function ProjectsPage() {
+  const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
-  const [clients, setClients] = useState<Client[]>([])
-  const [loading, setLoading] = useState(true)
+  const [clients,  setClients]  = useState<Client[]>([])
+  const [loading,  setLoading]  = useState(true)
   const [showModal, setShowModal] = useState(false)
-  const [editProject, setEditProject] = useState<Project | null>(null)
 
   async function load() {
     const [pr, cl] = await Promise.all([
       fetch("/api/projects").then((r) => r.json()),
       fetch("/api/clients").then((r) => r.json()),
     ])
-    setProjects(pr)
-    setClients(cl)
+    setProjects(Array.isArray(pr) ? pr : [])
+    setClients(Array.isArray(cl) ? cl : [])
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
-  async function toggleActive(p: Project) {
-    await fetch(`/api/projects/${p.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active: !p.active }),
-    })
-    load()
-  }
-
   return (
-    <div className="p-6 max-w-5xl mx-auto">
+    <div className="p-4 sm:p-6 max-w-5xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
@@ -67,15 +69,12 @@ export default function ProjectsPage() {
             {projects.filter((p) => p.active).length} active
           </p>
         </div>
-        <button
-          className="btn-primary"
-          onClick={() => { setEditProject(null); setShowModal(true) }}
-        >
+        <button className="btn-primary" onClick={() => setShowModal(true)}>
           New project
         </button>
       </div>
 
-      <div className="card overflow-hidden">
+      <div className="card overflow-x-auto">
         {loading ? (
           <div className="p-8 text-center text-sm text-gray-400">Loading…</div>
         ) : projects.length === 0 ? (
@@ -89,45 +88,35 @@ export default function ProjectsPage() {
                 <th>Name</th>
                 <th>Client</th>
                 <th>Billing</th>
-                <th>Description</th>
+                <th>Health</th>
                 <th>Status</th>
-                <th></th>
               </tr>
             </thead>
             <tbody>
-              {projects.map((p) => (
-                <tr key={p.id}>
-                  <td className="font-medium text-gray-900">{p.name}</td>
-                  <td className="text-gray-500">{p.client.name}</td>
-                  <td className="text-xs text-gray-500">{BILLING_LABELS[p.billingType] ?? p.billingType}</td>
-                  <td className="text-gray-400 max-w-xs truncate">{p.description ?? "—"}</td>
-                  <td>
-                    <span className={`badge ${p.active ? "badge-approved" : "badge-draft"}`}>
-                      {p.active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-                  <td className="space-x-3">
-                    <button
-                      onClick={() => { setEditProject(p); setShowModal(true) }}
-                      className="text-sm text-blue-600 hover:underline"
-                    >
-                      Edit
-                    </button>
-                    <Link
-                      href={`/projects/${p.id}`}
-                      className="text-sm text-blue-600 hover:underline"
-                    >
-                      Team
-                    </Link>
-                    <button
-                      onClick={() => toggleActive(p)}
-                      className="text-sm text-gray-400 hover:text-gray-700"
-                    >
-                      {p.active ? "Deactivate" : "Activate"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {projects.map((p) => {
+                const health = getHealth(p)
+                return (
+                  <tr
+                    key={p.id}
+                    onClick={() => router.push(`/projects/${p.id}`)}
+                    className="cursor-pointer hover:bg-gray-50 transition-colors"
+                  >
+                    <td className="font-medium text-gray-900">{p.name}</td>
+                    <td className="text-gray-500">{p.client.name}</td>
+                    <td className="text-xs text-gray-500">
+                      {BILLING_LABELS[p.billingType] ?? p.billingType}
+                    </td>
+                    <td>
+                      <span className={`badge ${health.cls}`}>{health.label}</span>
+                    </td>
+                    <td>
+                      <span className={`badge ${p.active ? "badge-approved" : "badge-draft"}`}>
+                        {p.active ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -135,7 +124,6 @@ export default function ProjectsPage() {
 
       {showModal && (
         <ProjectModal
-          project={editProject}
           clients={clients}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); load() }}
@@ -146,58 +134,50 @@ export default function ProjectsPage() {
 }
 
 function ProjectModal({
-  project,
   clients,
   onClose,
   onSaved,
 }: {
-  project: Project | null
   clients: Client[]
   onClose: () => void
   onSaved: () => void
 }) {
-  const [clientId,       setClientId]       = useState(project?.client.id ?? "")
-  const [name,           setName]           = useState(project?.name ?? "")
-  const [description,    setDescription]    = useState(project?.description ?? "")
-  const [billingType,    setBillingType]    = useState<"TM" | "DRAWDOWN" | "FIXED">(project?.billingType ?? "TM")
-  const [rateOverride,   setRateOverride]   = useState(project?.rateOverride != null ? String(project.rateOverride) : "")
-  const [drawdownRate,   setDrawdownRate]   = useState(project?.drawdownRate  != null ? String(project.drawdownRate)  : "")
-  const [budgetHours,    setBudgetHours]    = useState(project?.budgetHours   != null ? String(project.budgetHours)   : "")
-  const [contingencyHours, setContingencyHours] = useState(project?.contingencyHours != null ? String(project.contingencyHours) : "")
-  const [budgetValue,    setBudgetValue]    = useState(project?.budgetValue   != null ? String(project.budgetValue)   : "")
-  const [saving,         setSaving]         = useState(false)
-  const [error,          setError]          = useState("")
+  const [clientId,          setClientId]          = useState("")
+  const [name,              setName]              = useState("")
+  const [description,       setDescription]       = useState("")
+  const [billingType,       setBillingType]       = useState<"TM" | "DRAWDOWN" | "FIXED">("TM")
+  const [rateOverride,      setRateOverride]      = useState("")
+  const [drawdownRate,      setDrawdownRate]      = useState("")
+  const [budgetHours,       setBudgetHours]       = useState("")
+  const [contingencyHours,  setContingencyHours]  = useState("")
+  const [budgetValue,       setBudgetValue]       = useState("")
+  const [saving,            setSaving]            = useState(false)
+  const [error,             setError]             = useState("")
 
-  // Resolve client defaultRate for the no-rate warning
-  const selectedClient = clients.find((c) => c.id === (project?.client.id ?? clientId))
+  const selectedClient = clients.find((c) => c.id === clientId)
   const noRateConfigured =
     billingType === "TM" && !rateOverride && !selectedClient?.defaultRate
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!project && !clientId) { setError("Please select a client."); return }
+    if (!clientId) { setError("Please select a client."); return }
     setSaving(true)
     setError("")
 
-    const billingPayload = {
-      billingType,
-      rateOverride:     billingType === "TM"       && rateOverride      ? parseFloat(rateOverride)      : null,
-      drawdownRate:     billingType === "DRAWDOWN"  && drawdownRate      ? parseFloat(drawdownRate)      : null,
-      budgetHours:      (billingType === "DRAWDOWN" || billingType === "FIXED") && budgetHours ? parseFloat(budgetHours) : null,
-      contingencyHours: billingType === "FIXED"     && contingencyHours ? parseFloat(contingencyHours) : null,
-      budgetValue:      billingType === "FIXED"     && budgetValue       ? parseFloat(budgetValue)       : null,
-    }
-
-    const url    = project ? `/api/projects/${project.id}` : "/api/projects"
-    const method = project ? "PATCH" : "POST"
-    const body   = project
-      ? { name, description: description || undefined, ...billingPayload }
-      : { name, description: description || undefined, clientId, ...billingPayload }
-
-    const res = await fetch(url, {
-      method,
+    const res = await fetch("/api/projects", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        name,
+        description: description || undefined,
+        clientId,
+        billingType,
+        rateOverride:     billingType === "TM"       && rateOverride      ? parseFloat(rateOverride)      : null,
+        drawdownRate:     billingType === "DRAWDOWN"  && drawdownRate      ? parseFloat(drawdownRate)      : null,
+        budgetHours:      (billingType === "DRAWDOWN" || billingType === "FIXED") && budgetHours ? parseFloat(budgetHours) : null,
+        contingencyHours: billingType === "FIXED"     && contingencyHours ? parseFloat(contingencyHours) : null,
+        budgetValue:      billingType === "FIXED"     && budgetValue       ? parseFloat(budgetValue)       : null,
+      }),
     })
 
     setSaving(false)
@@ -217,7 +197,7 @@ function ProjectModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
-          <h2 className="text-lg font-semibold">{project ? "Edit Project" : "New Project"}</h2>
+          <h2 className="text-lg font-semibold">New Project</h2>
         </div>
 
         <div className="overflow-y-auto flex-1 min-h-0">
@@ -226,22 +206,20 @@ function ProjectModal({
               <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
             )}
 
-            {!project && (
-              <div>
-                <label className="label">Client *</label>
-                <select
-                  className="input"
-                  required
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                >
-                  <option value="">Select a client…</option>
-                  {clients.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
+            <div>
+              <label className="label">Client *</label>
+              <select
+                className="input"
+                required
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+              >
+                <option value="">Select a client…</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
 
             <div>
               <label className="label">Project name *</label>
@@ -264,7 +242,6 @@ function ProjectModal({
               />
             </div>
 
-            {/* ── Billing ──────────────────────────────────────── */}
             <div className="pt-2 pb-1 border-t border-gray-200">
               <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Billing</p>
             </div>
@@ -282,39 +259,28 @@ function ProjectModal({
               </select>
             </div>
 
-            {/* T&M: rate override */}
             {billingType === "TM" && (
               <div>
                 <label className="label">Hourly rate override (£/hr)</label>
                 <input
-                  type="number"
-                  className="input w-40"
-                  min="0"
-                  step="0.01"
+                  type="number" className="input w-40" min="0" step="0.01"
                   placeholder="Leave blank to use client rate"
                   value={rateOverride}
                   onChange={(e) => setRateOverride(e.target.value)}
                 />
-                <p className="text-xs text-gray-400 mt-1">
-                  Overrides the client&apos;s default rate for this project.
-                </p>
                 {noRateConfigured && (
                   <p className="text-xs text-amber-600 mt-1 font-medium">
-                    ⚠ No rate configured — set a rate here or add a default rate to the client.
+                    No rate configured — set one here or on the client.
                   </p>
                 )}
               </div>
             )}
 
-            {/* Drawdown: drawdown rate */}
             {billingType === "DRAWDOWN" && (
               <div>
                 <label className="label">Drawdown rate (£/hr)</label>
                 <input
-                  type="number"
-                  className="input w-40"
-                  min="0"
-                  step="0.01"
+                  type="number" className="input w-40" min="0" step="0.01"
                   placeholder="e.g. 95.00"
                   value={drawdownRate}
                   onChange={(e) => setDrawdownRate(e.target.value)}
@@ -322,15 +288,11 @@ function ProjectModal({
               </div>
             )}
 
-            {/* Drawdown + Fixed: budget hours */}
             {(billingType === "DRAWDOWN" || billingType === "FIXED") && (
               <div>
                 <label className="label">Budget hours</label>
                 <input
-                  type="number"
-                  className="input w-40"
-                  min="0"
-                  step="0.5"
+                  type="number" className="input w-40" min="0" step="0.5"
                   placeholder="e.g. 200"
                   value={budgetHours}
                   onChange={(e) => setBudgetHours(e.target.value)}
@@ -338,16 +300,12 @@ function ProjectModal({
               </div>
             )}
 
-            {/* Fixed only: contingency hours + fixed price */}
             {billingType === "FIXED" && (
               <>
                 <div>
                   <label className="label">Contingency hours</label>
                   <input
-                    type="number"
-                    className="input w-40"
-                    min="0"
-                    step="0.5"
+                    type="number" className="input w-40" min="0" step="0.5"
                     placeholder="e.g. 20"
                     value={contingencyHours}
                     onChange={(e) => setContingencyHours(e.target.value)}
@@ -356,10 +314,7 @@ function ProjectModal({
                 <div>
                   <label className="label">Fixed price (£)</label>
                   <input
-                    type="number"
-                    className="input w-40"
-                    min="0"
-                    step="0.01"
+                    type="number" className="input w-40" min="0" step="0.01"
                     placeholder="e.g. 25000.00"
                     value={budgetValue}
                     onChange={(e) => setBudgetValue(e.target.value)}
@@ -373,7 +328,7 @@ function ProjectModal({
         <div className="px-6 py-4 border-t border-gray-200 flex-shrink-0 flex justify-end gap-3">
           <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
           <button type="submit" form="project-form" disabled={saving} className="btn-primary">
-            {saving ? "Saving…" : project ? "Save changes" : "Create project"}
+            {saving ? "Saving…" : "Create project"}
           </button>
         </div>
       </div>

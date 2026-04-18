@@ -38,7 +38,7 @@ export default async function ProtectedLayout({
         version={APP_VERSION}
       />
       <main
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto pt-[52px] md:pt-0"
         style={{ backgroundColor: "var(--color-page-bg, #f9fafb)" }}
       >
         {children}

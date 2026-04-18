@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, useMemo } from "react"
+import Link from "next/link"
 
 interface BillingClient {
   id: string
@@ -171,13 +172,19 @@ export default function InvoicesPage() {
                   <td className="text-gray-400">
                     {new Date(inv.createdAt).toLocaleDateString("en-GB")}
                   </td>
-                  <td>
+                  <td className="space-x-3 whitespace-nowrap">
                     <button
                       onClick={() => setPreviewInvoice(inv)}
                       className="text-sm text-blue-600 hover:underline"
                     >
-                      View
+                      Quick view
                     </button>
+                    <Link
+                      href={`/invoices/${inv.id}`}
+                      className="text-sm text-blue-600 hover:underline"
+                    >
+                      Preview
+                    </Link>
                   </td>
                 </tr>
               ))}

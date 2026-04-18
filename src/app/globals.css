@@ -99,4 +99,22 @@
   .modal-box {
     @apply bg-white rounded-xl shadow-xl w-full max-w-lg;
   }
+
+  /* Responsive table wrapper — horizontal scroll on small screens */
+  .table-responsive {
+    @apply overflow-x-auto -mx-4 sm:mx-0;
+  }
+  .table-responsive .data-table {
+    @apply min-w-[600px];
+  }
+
+  /* Stacked form grid for small screens */
+  .form-grid {
+    @apply grid grid-cols-1 sm:grid-cols-2 gap-4;
+  }
+
+  /* Touch-friendly minimum target size */
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
 }
