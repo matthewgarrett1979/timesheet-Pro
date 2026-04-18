@@ -157,6 +157,9 @@ model User {
   userProjects    UserProject[]
   purchaseOrders  PurchaseOrder[]
 
+  resourceAllocations  ResourceAllocation[]
+  allocationsCreated   ResourceAllocation[] @relation("AllocationCreatedBy")
+
   // NextAuth
   accounts       Account[]
   sessions       Session[]
@@ -225,10 +228,11 @@ model Project {
   budgetValue      Decimal?    @db.Decimal(10, 2)
   drawdownRate     Decimal?    @db.Decimal(10, 2)
 
-  phases          ProjectPhase[]
-  timeEntries     TimeEntry[]
-  userProjects    UserProject[]
-  purchaseOrders  PurchaseOrder[]
+  phases               ProjectPhase[]
+  timeEntries          TimeEntry[]
+  userProjects         UserProject[]
+  purchaseOrders       PurchaseOrder[]
+  resourceAllocations  ResourceAllocation[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -306,6 +310,26 @@ model PurchaseOrder {
   @@index([phaseId])
   @@index([createdById])
   @@index([status])
+}
+
+model ResourceAllocation {
+  id           String   @id @default(cuid())
+  projectId    String
+  userId       String
+  date         DateTime @db.Date
+  plannedHours Decimal  @db.Decimal(5, 2)
+  notes        String?
+  createdById  String
+  createdAt    DateTime @default(now())
+
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id])
+  createdBy User    @relation("AllocationCreatedBy", fields: [createdById], references: [id])
+
+  @@unique([projectId, userId, date])
+  @@index([projectId])
+  @@index([userId])
+  @@index([date])
 }
 
 model TimeCategory {
