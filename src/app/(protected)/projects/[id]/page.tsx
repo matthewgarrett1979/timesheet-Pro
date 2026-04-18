@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { useParams } from "next/navigation"
 import { useSession } from "next-auth/react"
 import Link from "next/link"
+import ResourceCalendar from "@/components/ResourceCalendar"
 
 interface Phase {
   id: string
@@ -602,6 +603,9 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Resource Calendar */}
+      <ResourceCalendar projectId={id} canManage={canManagePos} />
 
       {/* Phases section */}
       <div className="card overflow-hidden">

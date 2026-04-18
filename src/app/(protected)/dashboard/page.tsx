@@ -4,6 +4,8 @@ import { db } from "@/lib/db"
 import { redirect } from "next/navigation"
 import Link from "next/link"
 import { Prisma, Role } from "@prisma/client"
+import PersonalCalendar from "@/components/PersonalCalendar"
+import TeamAllocationCalendar from "@/components/TeamAllocationCalendar"
 
 export const dynamic = "force-dynamic"
 
@@ -62,12 +64,7 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
   const thisMonday = weekStart(now)
   const thisSunday = addDays(thisMonday, 6); thisSunday.setHours(23, 59, 59, 999)
 
-  // First day of current month
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthEnd   = new Date(now.getFullYear(), now.getMonth() + 1, 0)
-  monthEnd.setHours(23, 59, 59, 999)
-
-  const [todayEntries, weekEntries, monthEntries, myProjects, recentEntries] =
+  const [todayEntries, weekEntries, myProjects, recentEntries] =
     await Promise.all([
       db.timeEntry.findMany({
         where: { managerId: userId, date: { gte: today, lte: todayEnd } },
@@ -75,10 +72,6 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
       }),
       db.timeEntry.findMany({
         where: { managerId: userId, date: { gte: thisMonday, lte: thisSunday } },
-        select: { hours: true, date: true },
-      }),
-      db.timeEntry.findMany({
-        where: { managerId: userId, date: { gte: monthStart, lte: monthEnd } },
         select: { hours: true, date: true },
       }),
       db.userProject.findMany({
@@ -104,16 +97,6 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
     weekByDay[dy] = (weekByDay[dy] ?? 0) + Number(e.hours)
   })
   const weekTotal = weekByDay.reduce((s, h) => s + h, 0)
-
-  // Monthly calendar: days → hours
-  const monthHoursByDay: Record<number, number> = {}
-  monthEntries.forEach((e) => {
-    const day = new Date(e.date).getDate()
-    monthHoursByDay[day] = (monthHoursByDay[day] ?? 0) + Number(e.hours)
-  })
-
-  const daysInMonth = monthEnd.getDate()
-  const firstDayOfMonth = (monthStart.getDay() || 7) - 1 // 0=Mon
 
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
@@ -224,38 +207,8 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
         </div>
       </div>
 
-      {/* Personal monthly calendar */}
-      <div className="card p-5">
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">
-          {now.toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
-        </h2>
-        <div className="grid grid-cols-7 gap-1 text-center mb-1">
-          {DAY_LABELS.map((d) => (
-            <p key={d} className="text-xs text-gray-400 font-medium">{d}</p>
-          ))}
-        </div>
-        <div className="grid grid-cols-7 gap-1">
-          {Array.from({ length: firstDayOfMonth }).map((_, i) => <div key={`empty-${i}`} />)}
-          {Array.from({ length: daysInMonth }).map((_, i) => {
-            const day  = i + 1
-            const hrs  = monthHoursByDay[day] ?? 0
-            const isT  = day === now.getDate()
-            return (
-              <div
-                key={day}
-                className={`aspect-square rounded-lg flex flex-col items-center justify-center text-xs ${
-                  isT ? "bg-blue-500 text-white" :
-                  hrs > 0 ? "bg-blue-50 text-blue-700" :
-                  "bg-gray-50 text-gray-400"
-                }`}
-              >
-                <span className="font-medium">{day}</span>
-                {hrs > 0 && <span className="text-[10px] leading-tight">{hrs.toFixed(1)}</span>}
-              </div>
-            )
-          })}
-        </div>
-      </div>
+      {/* Personal monthly calendar — interactive client component */}
+      <PersonalCalendar />
     </div>
   )
 }
@@ -490,6 +443,9 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
           </div>
         </div>
       )}
+
+      {/* Team allocation calendar — client component */}
+      <TeamAllocationCalendar />
 
       {/* Recent timesheets */}
       <div className="card overflow-hidden">
