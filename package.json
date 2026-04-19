@@ -1,6 +1,6 @@
 {
   "name": "tech-timesheet",
-  "version": "2.2.5",
+  "version": "2.3.1",
   "private": true,
   "scripts": {
     "dev": "next dev",

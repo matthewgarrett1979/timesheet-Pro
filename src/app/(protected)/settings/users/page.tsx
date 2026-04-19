@@ -40,6 +40,10 @@ export default function UsersPage() {
   const [expandedUser, setExpandedUser] = useState<string | null>(null)
   const [userProjects, setUserProjects] = useState<Record<string, UserProject[]>>({})
   const [allProjects, setAllProjects] = useState<Project[]>([])
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("")
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteError, setDeleteError] = useState("")
 
   useEffect(() => {
     if (session && session.user.role !== "ADMIN") {
@@ -109,6 +113,30 @@ export default function UsersPage() {
       body: JSON.stringify({ userId }),
     })
     await loadUserProjects(userId)
+  }
+
+  async function handleDeleteUser() {
+    if (!deleteTarget) return
+    if (deleteConfirmEmail !== deleteTarget.email) {
+      setDeleteError("Email address does not match.")
+      return
+    }
+    setDeleteLoading(true)
+    setDeleteError("")
+    const res = await fetch(`/api/users/${deleteTarget.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cascade: true }),
+    })
+    setDeleteLoading(false)
+    if (!res.ok) {
+      const data = await res.json()
+      setDeleteError(data.error ?? "Failed to delete user.")
+      return
+    }
+    setDeleteTarget(null)
+    setDeleteConfirmEmail("")
+    load()
   }
 
   if (session?.user?.role !== "ADMIN") return null
@@ -199,6 +227,14 @@ export default function UsersPage() {
                             {isExpanded ? "Hide" : "Projects"}
                           </button>
                         )}
+                        {u.id !== session?.user?.id && (
+                          <button
+                            onClick={() => { setDeleteTarget(u); setDeleteConfirmEmail(""); setDeleteError("") }}
+                            className="text-sm text-red-500 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                     {isExpanded && (
@@ -276,6 +312,47 @@ export default function UsersPage() {
           password={tempPassword.password}
           onClose={() => setTempPassword(null)}
         />
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="modal-box max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-red-700">Delete User</h2>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div className="bg-red-50 border border-red-200 rounded p-3">
+                <p className="text-sm font-medium text-red-800 mb-1">This action is permanent and cannot be undone.</p>
+                <p className="text-sm text-red-700">
+                  Deleting <span className="font-medium">{deleteTarget.name}</span> ({deleteTarget.email}) will also delete all their time entries, timesheets, and expenses. Their projects and clients will be reassigned to you.
+                </p>
+              </div>
+              {deleteError && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{deleteError}</p>
+              )}
+              <div>
+                <label className="label">Type the user&apos;s email address to confirm</label>
+                <input
+                  type="email"
+                  className="input"
+                  placeholder={deleteTarget.email}
+                  value={deleteConfirmEmail}
+                  onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button className="btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button
+                  className="btn-danger"
+                  disabled={deleteLoading || deleteConfirmEmail !== deleteTarget.email}
+                  onClick={handleDeleteUser}
+                >
+                  {deleteLoading ? "Deleting…" : "Permanently delete user"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

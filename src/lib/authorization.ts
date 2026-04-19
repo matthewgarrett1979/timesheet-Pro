@@ -239,24 +239,34 @@ export async function getExpenseForUser(expenseId: string, userId: string, role:
   return db.expense.findFirst({
     where: {
       id: expenseId,
-      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+      // MANAGER and ADMIN can access any expense (needed for approvals workflow)
+      ...(role === Role.USER ? { managerId: userId } : {}),
     },
-    include: { client: { select: { id: true, name: true } } },
+    include: {
+      client: { select: { id: true, name: true } },
+      manager: { select: { id: true, name: true, email: true } },
+    },
   })
 }
 
 export async function listExpensesForUser(
   userId: string,
   role: Role,
-  filters?: { clientId?: string; status?: string }
+  filters?: { clientId?: string; status?: string; forReview?: boolean }
 ) {
+  // forReview=true: MANAGER/ADMIN see all expenses (approvals page)
+  // otherwise: USER sees own, MANAGER sees own, ADMIN sees all
+  const scopeToOwn = role === Role.USER || (role === Role.MANAGER && !filters?.forReview)
   return db.expense.findMany({
     where: {
-      ...(role !== Role.ADMIN ? { managerId: userId } : {}),
+      ...(role === Role.ADMIN ? {} : scopeToOwn ? { managerId: userId } : {}),
       ...(filters?.clientId ? { clientId: filters.clientId } : {}),
       ...(filters?.status   ? { status: filters.status as never } : {}),
     },
-    include: { client: { select: { id: true, name: true } } },
+    include: {
+      client: { select: { id: true, name: true } },
+      manager: { select: { id: true, name: true } },
+    },
     orderBy: { date: "desc" },
   })
 }

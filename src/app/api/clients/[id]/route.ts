@@ -169,7 +169,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
 
-  // Block deletion if any associated records exist
+  const isAdmin = (auth.session.user.role as Role) === Role.ADMIN
+
+  // Check associated data
   const [timesheets, invoices, expenses, projects] = await Promise.all([
     db.timesheet.count({ where: { clientId: id } }),
     db.invoice.count({ where: { clientId: id } }),
@@ -177,24 +179,60 @@ export async function DELETE(
     db.project.count({ where: { clientId: id } }),
   ])
 
-  if (timesheets + invoices + expenses + projects > 0) {
+  const hasDependents = timesheets + invoices + expenses + projects > 0
+
+  let body: { cascade?: boolean } = {}
+  try {
+    const raw = await req.json().catch(() => ({}))
+    body = raw
+  } catch {
+    // no body
+  }
+
+  if (hasDependents && !(isAdmin && body.cascade)) {
     return NextResponse.json(
       {
-        error: `Cannot delete — this client has associated timesheets, projects or invoices. Archive the client instead.`,
+        error: isAdmin
+          ? "Client has associated data. Pass cascade=true to force-delete everything."
+          : "Cannot delete — this client has associated timesheets, projects or invoices. Archive the client instead.",
         counts: { timesheets, invoices, expenses, projects },
       },
       { status: 409 }
     )
   }
 
-  await db.client.delete({ where: { id } })
+  if (isAdmin && body.cascade && hasDependents) {
+    const projectIds = (
+      await db.project.findMany({ where: { clientId: id }, select: { id: true } })
+    ).map((p) => p.id)
+
+    await db.$transaction([
+      db.resourceAllocation.deleteMany({ where: { projectId: { in: projectIds } } }),
+      db.timeEntry.updateMany({ where: { projectId: { in: projectIds } }, data: { projectId: null, phaseId: null, purchaseOrderId: null, clientId: null } }),
+      db.timeEntry.updateMany({ where: { clientId: id }, data: { clientId: null } }),
+      db.purchaseOrder.deleteMany({ where: { projectId: { in: projectIds } } }),
+      db.projectPhase.deleteMany({ where: { projectId: { in: projectIds } } }),
+      db.userProject.deleteMany({ where: { projectId: { in: projectIds } } }),
+      db.project.deleteMany({ where: { clientId: id } }),
+      db.timesheet.deleteMany({ where: { clientId: id } }),
+      db.expense.deleteMany({ where: { clientId: id } }),
+      db.invoice.deleteMany({ where: { clientId: id } }),
+      db.client.delete({ where: { id } }),
+    ])
+  } else {
+    await db.client.delete({ where: { id } })
+  }
 
   await audit({
     userId: auth.session.user.id,
     action: AuditAction.CLIENT_DELETED,
     resource: "client",
     resourceId: id,
-    metadata: { name: existing.name, reference: existing.reference },
+    metadata: {
+      name: existing.name,
+      reference: existing.reference,
+      cascade: body.cascade ?? false,
+    },
     ipAddress: getClientIp(req),
     userAgent: req.headers.get("user-agent") ?? undefined,
     success: true,

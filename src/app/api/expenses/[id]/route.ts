@@ -1,6 +1,7 @@
 /**
- * GET   /api/expenses/[id]  — fetch an expense (ownership enforced)
- * PATCH /api/expenses/[id]  — update an expense (DRAFT only)
+ * GET    /api/expenses/[id]  — fetch an expense (ownership enforced)
+ * PATCH  /api/expenses/[id]  — update an expense (DRAFT only)
+ * DELETE /api/expenses/[id]  — delete expense; DRAFT: owner or ADMIN; non-DRAFT: ADMIN only
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -11,6 +12,7 @@ import { audit, getClientIp } from "@/lib/audit"
 import { checkRateLimit } from "@/lib/rate-limit"
 import { AuditAction, ExpenseStatus, Role } from "@prisma/client"
 import { z } from "zod"
+import { del as blobDel } from "@vercel/blob"
 
 const updateSchema = z.object({
   description: z.string().trim().min(1).max(500).optional(),
@@ -101,4 +103,69 @@ export async function PATCH(
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+
+  const role = session.user.role as Role
+  const expense = await getExpenseForUser(id, session.user.id, role)
+
+  if (!expense) {
+    await audit({
+      userId: session.user.id,
+      action: AuditAction.UNAUTHORISED_ACCESS,
+      resource: "expense",
+      resourceId: id,
+      metadata: { action: "delete" },
+      ipAddress: getClientIp(req),
+      success: false,
+    })
+    return NextResponse.json({ error: "Not found" }, { status: 404 })
+  }
+
+  if (expense.status !== ExpenseStatus.DRAFT && role !== Role.ADMIN) {
+    return NextResponse.json(
+      { error: "Only ADMIN can delete non-DRAFT expenses" },
+      { status: 409 }
+    )
+  }
+
+  if (expense.receiptPath) {
+    try {
+      await blobDel(expense.receiptPath)
+    } catch {
+      // Non-fatal — receipt may already be gone
+    }
+  }
+
+  await db.expense.delete({ where: { id } })
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.EXPENSE_DELETED,
+    resource: "expense",
+    resourceId: id,
+    metadata: {
+      amount: expense.amount.toString(),
+      currency: expense.currency,
+      category: expense.category,
+      status: expense.status,
+    },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }

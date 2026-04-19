@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSession } from "next-auth/react"
 
 const CATEGORIES = [
   "Travel", "Accommodation", "Subsistence", "Equipment",
@@ -10,10 +11,10 @@ const CATEGORIES = [
 const STATUS_OPTIONS = ["", "DRAFT", "SUBMITTED", "APPROVED", "REJECTED"]
 
 const statusClass: Record<string, string> = {
-  DRAFT: "badge-draft",
+  DRAFT:     "badge-draft",
   SUBMITTED: "badge-submitted",
-  APPROVED: "badge-approved",
-  REJECTED: "badge-rejected",
+  APPROVED:  "badge-approved",
+  REJECTED:  "badge-rejected",
 }
 
 interface Client { id: string; name: string }
@@ -26,16 +27,26 @@ interface Expense {
   date: string
   category: string
   status: string
+  billable: boolean
+  invoiced: boolean
+  rejectionNote: string | null
   client: { id: string; name: string } | null
+  manager: { id: string; name: string }
 }
 
 export default function ExpensesPage() {
+  const { data: session } = useSession()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState("")
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [actionError, setActionError] = useState("")
+
+  const isAdmin = session?.user?.role === "ADMIN"
 
   async function load() {
     const qs = statusFilter ? `?status=${statusFilter}` : ""
@@ -43,14 +54,41 @@ export default function ExpensesPage() {
       fetch(`/api/expenses${qs}`).then((r) => r.json()),
       fetch("/api/clients").then((r) => r.json()),
     ])
-    setExpenses(ex)
-    setClients(cl)
+    setExpenses(Array.isArray(ex) ? ex : [])
+    setClients(Array.isArray(cl) ? cl : [])
     setLoading(false)
   }
 
   useEffect(() => { setLoading(true); load() }, [statusFilter])
 
   const total = expenses.reduce((sum, e) => sum + parseFloat(e.amount), 0)
+
+  async function handleSubmit(expenseId: string) {
+    setActionLoading(expenseId)
+    setActionError("")
+    const res = await fetch(`/api/expenses/${expenseId}/submit`, { method: "POST" })
+    setActionLoading(null)
+    if (!res.ok) {
+      const data = await res.json()
+      setActionError(data.error ?? "Failed to submit expense.")
+    } else {
+      await load()
+    }
+  }
+
+  async function handleDelete(expenseId: string) {
+    setActionLoading(expenseId)
+    setActionError("")
+    const res = await fetch(`/api/expenses/${expenseId}`, { method: "DELETE" })
+    setActionLoading(null)
+    setDeleteConfirmId(null)
+    if (!res.ok) {
+      const data = await res.json()
+      setActionError(data.error ?? "Failed to delete expense.")
+    } else {
+      await load()
+    }
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -65,6 +103,13 @@ export default function ExpensesPage() {
           Add expense
         </button>
       </div>
+
+      {actionError && (
+        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          {actionError}
+          <button className="ml-2 text-red-400 hover:text-red-600" onClick={() => setActionError("")}>×</button>
+        </div>
+      )}
 
       {/* Status filter */}
       <div className="flex gap-2 mb-4 flex-wrap">
@@ -103,35 +148,99 @@ export default function ExpensesPage() {
             </thead>
             <tbody>
               {expenses.map((e) => (
-                <tr key={e.id}>
-                  <td>{new Date(e.date).toLocaleDateString("en-GB")}</td>
-                  <td className="font-medium text-gray-900 max-w-xs truncate">{e.description}</td>
-                  <td className="text-gray-500">{e.category}</td>
-                  <td className="text-gray-500">{e.client?.name ?? "—"}</td>
-                  <td className="font-mono text-sm">
-                    {e.currency} {parseFloat(e.amount).toFixed(2)}
-                  </td>
-                  <td>
-                    <span className={`badge ${statusClass[e.status] ?? "badge-draft"}`}>
-                      {e.status}
-                    </span>
-                  </td>
-                  <td>
-                    {e.status === "DRAFT" && (
-                      <button
-                        onClick={() => { setEditExpense(e); setShowModal(true) }}
-                        className="text-sm text-blue-600 hover:underline"
-                      >
-                        Edit
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <>
+                  <tr key={e.id}>
+                    <td>{new Date(e.date).toLocaleDateString("en-GB")}</td>
+                    <td className="font-medium text-gray-900 max-w-xs truncate">{e.description}</td>
+                    <td className="text-gray-500">{e.category}</td>
+                    <td className="text-gray-500">{e.client?.name ?? "—"}</td>
+                    <td className="font-mono text-sm">
+                      {e.currency} {parseFloat(e.amount).toFixed(2)}
+                    </td>
+                    <td>
+                      <span className={`badge ${statusClass[e.status] ?? "badge-draft"}`}>
+                        {e.status}
+                      </span>
+                    </td>
+                    <td className="flex items-center gap-2">
+                      {e.status === "DRAFT" && (
+                        <>
+                          <button
+                            onClick={() => { setEditExpense(e); setShowModal(true) }}
+                            className="text-sm text-blue-600 hover:underline"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleSubmit(e.id)}
+                            disabled={actionLoading === e.id}
+                            className="text-sm text-amber-600 hover:underline disabled:opacity-50"
+                          >
+                            {actionLoading === e.id ? "…" : "Submit"}
+                          </button>
+                        </>
+                      )}
+                      {(e.status === "DRAFT" || isAdmin) && (
+                        <button
+                          onClick={() => setDeleteConfirmId(e.id)}
+                          className="text-sm text-red-500 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                  {e.status === "REJECTED" && e.rejectionNote && (
+                    <tr key={`${e.id}-note`}>
+                      <td colSpan={7} className="bg-red-50 px-4 py-2">
+                        <p className="text-xs text-red-700">
+                          <span className="font-medium">Rejected: </span>{e.rejectionNote}
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* Delete confirmation modal */}
+      {deleteConfirmId && (
+        <div className="modal-backdrop" onClick={() => setDeleteConfirmId(null)}>
+          <div className="modal-box max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-red-700">Delete Expense</h2>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <p className="text-sm text-gray-700">
+                {(() => {
+                  const exp = expenses.find((e) => e.id === deleteConfirmId)
+                  if (!exp) return "Are you sure?"
+                  if (exp.status !== "DRAFT") return (
+                    <>
+                      <span className="font-medium text-red-700">Warning:</span> This expense is{" "}
+                      <span className="font-medium">{exp.status}</span>. Deleting it cannot be undone.
+                    </>
+                  )
+                  return "Are you sure you want to delete this expense? This cannot be undone."
+                })()}
+              </p>
+              <div className="flex justify-end gap-3 pt-2">
+                <button className="btn-secondary" onClick={() => setDeleteConfirmId(null)}>Cancel</button>
+                <button
+                  className="btn-danger"
+                  disabled={actionLoading === deleteConfirmId}
+                  onClick={() => handleDelete(deleteConfirmId)}
+                >
+                  {actionLoading === deleteConfirmId ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <ExpenseModal

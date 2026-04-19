@@ -36,6 +36,7 @@ export async function GET(req: NextRequest) {
     {
       clientId: searchParams.get("clientId") ?? undefined,
       status: searchParams.get("status") ?? undefined,
+      forReview: searchParams.get("forReview") === "true",
     }
   )
 

@@ -1,6 +1,7 @@
 /**
- * GET   /api/users/[id]  — self or ADMIN: fetch user
- * PATCH /api/users/[id]  — self: update name/password; ADMIN: also update role/unlock
+ * GET    /api/users/[id]  — self or ADMIN: fetch user
+ * PATCH  /api/users/[id]  — self: update name/password; ADMIN: also update role/unlock
+ * DELETE /api/users/[id]  — ADMIN only; cannot delete self or last admin
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -137,4 +138,99 @@ export async function PATCH(
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+
+  const isAdmin = (session.user.role as Role) === Role.ADMIN
+  if (!isAdmin) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  if (id === session.user.id) {
+    return NextResponse.json({ error: "You cannot delete your own account" }, { status: 409 })
+  }
+
+  const target = await db.user.findUnique({
+    where: { id },
+    select: { id: true, email: true, name: true, role: true },
+  })
+  if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  if (target.role === Role.ADMIN) {
+    const adminCount = await db.user.count({ where: { role: Role.ADMIN } })
+    if (adminCount <= 1) {
+      return NextResponse.json({ error: "Cannot delete the last admin account" }, { status: 409 })
+    }
+  }
+
+  // Check for owned data
+  const [timesheets, timeEntries, expenses, projects, clients] = await Promise.all([
+    db.timesheet.count({ where: { managerId: id } }),
+    db.timeEntry.count({ where: { managerId: id } }),
+    db.expense.count({ where: { managerId: id } }),
+    db.project.count({ where: { managerId: id } }),
+    db.client.count({ where: { managerId: id } }),
+  ])
+
+  const total = timesheets + timeEntries + expenses + projects + clients
+  let body: { cascade?: boolean } = {}
+  try {
+    const raw = await req.json().catch(() => ({}))
+    body = raw
+  } catch {
+    // no body
+  }
+
+  if (total > 0 && !body.cascade) {
+    return NextResponse.json(
+      {
+        error: "User has associated data. Pass cascade=true to delete all their records.",
+        counts: { timesheets, timeEntries, expenses, projects, clients },
+      },
+      { status: 409 }
+    )
+  }
+
+  if (body.cascade && total > 0) {
+    await db.$transaction([
+      db.resourceAllocation.deleteMany({ where: { userId: id } }),
+      db.resourceAllocation.deleteMany({ where: { createdById: id } }),
+      db.timeEntry.deleteMany({ where: { managerId: id } }),
+      db.expense.deleteMany({ where: { managerId: id } }),
+      db.timesheet.deleteMany({ where: { managerId: id } }),
+      db.project.updateMany({ where: { managerId: id }, data: { managerId: session.user.id } }),
+      db.client.updateMany({ where: { managerId: id }, data: { managerId: session.user.id } }),
+    ])
+  }
+
+  // UserProject, Account, Session have onDelete: Cascade — handled by DB
+  await db.user.delete({ where: { id } })
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.USER_DELETED,
+    resource: "user",
+    resourceId: id,
+    metadata: {
+      email: target.email,
+      name: target.name,
+      role: target.role,
+      cascade: body.cascade ?? false,
+    },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }

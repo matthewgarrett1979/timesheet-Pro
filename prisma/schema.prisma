@@ -77,6 +77,7 @@ enum AuditAction {
   USER_LOCKED
   USER_CREATED
   USER_UPDATED
+  USER_DELETED
   MFA_SETUP
   MFA_VERIFIED
   MFA_FAILED
@@ -98,8 +99,13 @@ enum AuditAction {
   CLIENT_ARCHIVED
   PROJECT_CREATED
   PROJECT_UPDATED
+  PROJECT_DELETED
   EXPENSE_CREATED
   EXPENSE_UPDATED
+  EXPENSE_SUBMITTED
+  EXPENSE_APPROVED
+  EXPENSE_REJECTED
+  EXPENSE_DELETED
   APPROVAL_TOKEN_CREATED
   APPROVAL_TOKEN_USED
   APPROVAL_TOKEN_EXPIRED
@@ -154,7 +160,8 @@ model User {
   timesheets      Timesheet[]
   timeEntries     TimeEntry[]
   projects        Project[]
-  expenses        Expense[]
+  expenses        Expense[]        @relation("ExpenseManager")
+  expensesApproved Expense[]       @relation("ExpenseApprover")
   auditLogs       AuditLog[]
   approvalTokens  ApprovalToken[]
   userProjects    UserProject[]
@@ -414,24 +421,32 @@ model TimeEntry {
 }
 
 model Expense {
-  id          String        @id @default(cuid())
-  description String
-  amount      Decimal       @db.Decimal(10, 2)
-  currency    String        @default("GBP")
-  date        DateTime      @db.Date
-  category    String
-  receiptPath String?
-  managerId   String
-  manager     User          @relation(fields: [managerId], references: [id])
-  clientId    String?
-  client      Client?       @relation(fields: [clientId], references: [id])
-  status      ExpenseStatus @default(DRAFT)
+  id            String        @id @default(cuid())
+  description   String
+  amount        Decimal       @db.Decimal(10, 2)
+  currency      String        @default("GBP")
+  date          DateTime      @db.Date
+  category      String
+  receiptPath   String?
+  billable      Boolean       @default(true)
+  invoiced      Boolean       @default(false)
+  managerId     String
+  manager       User          @relation("ExpenseManager", fields: [managerId], references: [id])
+  clientId      String?
+  client        Client?       @relation(fields: [clientId], references: [id])
+  status        ExpenseStatus @default(DRAFT)
+  submittedAt   DateTime?
+  approvedById  String?
+  approvedBy    User?         @relation("ExpenseApprover", fields: [approvedById], references: [id])
+  approvedAt    DateTime?
+  rejectionNote String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([managerId])
   @@index([clientId])
+  @@index([status])
 }
 
 // Single-use HMAC-signed JWT approval tokens sent to clients

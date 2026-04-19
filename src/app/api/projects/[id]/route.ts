@@ -1,6 +1,7 @@
 /**
- * GET   /api/projects/[id]  — fetch a project (ownership enforced)
- * PATCH /api/projects/[id]  — update a project (ownership enforced)
+ * GET    /api/projects/[id]  — fetch a project (ownership enforced)
+ * PATCH  /api/projects/[id]  — update a project (ownership enforced)
+ * DELETE /api/projects/[id]  — ADMIN only; cascade=true to force-delete all data
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -95,4 +96,88 @@ export async function PATCH(
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+
+  if ((session.user.role as Role) !== Role.ADMIN) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
+  const project = await db.project.findUnique({
+    where: { id },
+    include: { client: { select: { id: true, name: true } } },
+  })
+  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  // Check associated data counts
+  const [timeEntries, purchaseOrders, resourceAllocations, phases] = await Promise.all([
+    db.timeEntry.count({ where: { projectId: id } }),
+    db.purchaseOrder.count({ where: { projectId: id } }),
+    db.resourceAllocation.count({ where: { projectId: id } }),
+    db.projectPhase.count({ where: { projectId: id } }),
+  ])
+
+  const hasDependents = timeEntries + purchaseOrders + resourceAllocations + phases > 0
+
+  let body: { cascade?: boolean } = {}
+  try {
+    const raw = await req.json().catch(() => ({}))
+    body = raw
+  } catch {
+    // no body
+  }
+
+  if (hasDependents && !body.cascade) {
+    return NextResponse.json(
+      {
+        error: "Project has associated data. Pass cascade=true to force-delete everything.",
+        counts: { timeEntries, purchaseOrders, resourceAllocations, phases },
+      },
+      { status: 409 }
+    )
+  }
+
+  if (body.cascade) {
+    await db.$transaction([
+      // Null out phase/project FK on time entries (no cascade in schema)
+      db.timeEntry.updateMany({ where: { projectId: id }, data: { projectId: null, phaseId: null, purchaseOrderId: null } }),
+      db.resourceAllocation.deleteMany({ where: { projectId: id } }),
+      db.purchaseOrder.deleteMany({ where: { projectId: id } }),
+      db.projectPhase.deleteMany({ where: { projectId: id } }),
+      db.userProject.deleteMany({ where: { projectId: id } }),
+      db.project.delete({ where: { id } }),
+    ])
+  } else {
+    await db.project.delete({ where: { id } })
+  }
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.PROJECT_DELETED,
+    resource: "project",
+    resourceId: id,
+    metadata: {
+      name: project.name,
+      clientName: project.client.name,
+      cascade: body.cascade ?? false,
+      counts: { timeEntries, purchaseOrders, resourceAllocations, phases },
+    },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }
