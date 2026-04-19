@@ -54,9 +54,10 @@ export default function ChangePasswordPage() {
     setNewPassword("")
     setConfirmPassword("")
 
-    // After a brief pause, redirect away from this page
+    // Redirect role-appropriately after a brief pause
+    const dest = session?.user?.role === "USER" ? "/time-entries" : "/dashboard"
     setTimeout(() => {
-      router.push("/dashboard")
+      router.push(dest)
     }, 1500)
   }
 

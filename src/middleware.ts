@@ -81,7 +81,8 @@ export async function middleware(req: NextRequest) {
       response = NextResponse.redirect(mfaUrl)
     } else if (
       token.mustChangePassword &&
-      pathname !== CHANGE_PASSWORD_PATH
+      pathname !== CHANGE_PASSWORD_PATH &&
+      !pathname.startsWith("/api/users/") // allow PATCH /api/users/[id] for password change
     ) {
       // Must change password before accessing anything else
       const cpUrl = req.nextUrl.clone()

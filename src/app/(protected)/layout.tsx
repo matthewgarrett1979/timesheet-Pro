@@ -19,9 +19,9 @@ export default async function ProtectedLayout({
     redirect("/mfa")
   }
 
-  if (session.user.mustChangePassword) {
-    redirect("/settings/change-password")
-  }
+  // NOTE: mustChangePassword is enforced by middleware (src/middleware.ts).
+  // Do NOT redirect here — the change-password page lives inside this layout
+  // group, so redirecting would create an infinite loop.
 
   return (
     <div
