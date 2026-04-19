@@ -62,6 +62,26 @@ interface TimeEntry {
   purchaseOrderId?: string | null
 }
 
+interface TeamMember {
+  id: string
+  assignedAt: string
+  user: {
+    id: string
+    name: string
+    email: string
+    role: string
+    costRate: string | null
+  }
+}
+
+interface AllUser {
+  id: string
+  name: string
+  email: string
+  role: string
+  costRate?: string | null
+}
+
 const BILLING_TYPE_LABELS: Record<string, string> = {
   TIME_AND_MATERIALS: "T&M",
   DRAWDOWN: "Drawdown",
@@ -181,15 +201,27 @@ export default function ProjectDetailPage() {
   const [deletePhaseId, setDeletePhaseId] = useState<string | null>(null)
   const [deletePhaseLoading, setDeletePhaseLoading] = useState(false)
 
+  // Team members
+  const [team, setTeam]                     = useState<TeamMember[]>([])
+  const [allUsers, setAllUsers]             = useState<AllUser[]>([])
+  const [showAddMember, setShowAddMember]   = useState(false)
+  const [addMemberUserId, setAddMemberUserId] = useState("")
+  const [addMemberCostRate, setAddMemberCostRate] = useState("")
+  const [addMemberLoading, setAddMemberLoading]   = useState(false)
+  const [addMemberError, setAddMemberError]       = useState("")
+  const [removeConfirmId, setRemoveConfirmId]     = useState<string | null>(null)
+  const [removeLoading, setRemoveLoading]         = useState(false)
+
   async function loadAll() {
     setLoading(true)
     setError("")
     try {
-      const [projRes, phasesRes, entriesRes, posRes] = await Promise.all([
+      const [projRes, phasesRes, entriesRes, posRes, teamRes] = await Promise.all([
         fetch(`/api/projects/${id}`),
         fetch(`/api/projects/${id}/phases`),
         fetch(`/api/time-entries?projectId=${id}`),
         fetch(`/api/projects/${id}/purchase-orders`),
+        fetch(`/api/projects/${id}/users`),
       ])
       if (!projRes.ok) {
         setError("Project not found.")
@@ -213,6 +245,11 @@ export default function ProjectDetailPage() {
         const posData = await posRes.json()
         setPurchaseOrders(Array.isArray(posData) ? posData : [])
       }
+
+      if (teamRes.ok) {
+        const teamData = await teamRes.json()
+        setTeam(Array.isArray(teamData) ? teamData : [])
+      }
     } catch {
       setError("Failed to load project.")
     }
@@ -223,6 +260,14 @@ export default function ProjectDetailPage() {
     if (id) loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // Fetch all users once for the add-member dropdown
+  useEffect(() => {
+    fetch("/api/users")
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d)) setAllUsers(d) })
+      .catch(() => {})
+  }, [])
 
   const totalHours = entries.reduce((acc, e) => acc + Number(e.hours), 0)
 
@@ -465,6 +510,51 @@ export default function ProjectDetailPage() {
     return entries
       .filter((e) => e.purchaseOrderId === poId)
       .reduce((acc, e) => acc + Number(e.hours), 0)
+  }
+
+  function openAddMember() {
+    const first = allUsers[0]
+    setAddMemberUserId(first?.id ?? "")
+    setAddMemberCostRate(first?.costRate ? String(Number(first.costRate)) : "")
+    setAddMemberError("")
+    setShowAddMember(true)
+  }
+
+  async function handleAddMember() {
+    if (!addMemberUserId) { setAddMemberError("Select a user."); return }
+    setAddMemberLoading(true); setAddMemberError("")
+    try {
+      const res = await fetch(`/api/projects/${id}/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId:   addMemberUserId,
+          costRate: addMemberCostRate ? parseFloat(addMemberCostRate) : undefined,
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json()
+        setAddMemberError(d.error ?? "Failed to add member.")
+      } else {
+        setShowAddMember(false)
+        loadAll()
+      }
+    } catch { setAddMemberError("Network error.") }
+    setAddMemberLoading(false)
+  }
+
+  async function handleRemoveMember(userId: string) {
+    setRemoveLoading(true)
+    try {
+      await fetch(`/api/projects/${id}/users`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      })
+      setRemoveConfirmId(null)
+      loadAll()
+    } catch { /* ignore */ }
+    setRemoveLoading(false)
   }
 
   if (loading) {
@@ -1321,6 +1411,143 @@ export default function ProjectDetailPage() {
           </table>
         )}
       </div>
+
+      {/* Team section */}
+      {canManagePos && (
+        <div className="card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+            <h2 className="text-base font-semibold text-gray-800">Team</h2>
+            <button className="btn btn-primary text-sm" onClick={openAddMember}>
+              Add team member
+            </button>
+          </div>
+
+          {team.length === 0 ? (
+            <div className="p-8 text-center text-sm text-gray-400">
+              No team members assigned. Click &ldquo;Add team member&rdquo; to get started.
+            </div>
+          ) : (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  {canDeletePo && <th className="text-right">Cost rate</th>}
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {team.map((m) => (
+                  <tr key={m.id}>
+                    <td className="font-medium text-gray-900">{m.user.name}</td>
+                    <td className="text-gray-500">{m.user.email}</td>
+                    <td>
+                      <span className={`badge ${
+                        m.user.role === "ADMIN"   ? "badge-admin" :
+                        m.user.role === "MANAGER" ? "badge-manager" :
+                        "badge-draft"
+                      }`}>
+                        {m.user.role}
+                      </span>
+                    </td>
+                    {canDeletePo && (
+                      <td className="text-right font-mono text-sm text-gray-600">
+                        {m.user.costRate ? `£${Number(m.user.costRate).toFixed(2)}/hr` : "—"}
+                      </td>
+                    )}
+                    <td className="text-right">
+                      {canDeletePo && (
+                        removeConfirmId === m.user.id ? (
+                          <span className="flex items-center justify-end gap-2">
+                            <span className="text-xs text-gray-500">Remove {m.user.name}?</span>
+                            <button
+                              className="text-xs text-red-600 hover:underline"
+                              disabled={removeLoading}
+                              onClick={() => handleRemoveMember(m.user.id)}
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              className="text-xs text-gray-400 hover:underline"
+                              onClick={() => setRemoveConfirmId(null)}
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            className="text-xs text-red-500 hover:underline"
+                            onClick={() => setRemoveConfirmId(m.user.id)}
+                          >
+                            Remove
+                          </button>
+                        )
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Add member modal */}
+      {showAddMember && (
+        <div className="modal-backdrop" onClick={() => setShowAddMember(false)}>
+          <div className="modal-box p-6 max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-800 mb-4">Add team member</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="label">User</label>
+                <select
+                  className="input"
+                  value={addMemberUserId}
+                  onChange={(e) => {
+                    const uid = e.target.value
+                    setAddMemberUserId(uid)
+                    const u = allUsers.find((u) => u.id === uid)
+                    setAddMemberCostRate(u?.costRate ? String(Number(u.costRate)) : "")
+                  }}
+                >
+                  {allUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({u.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">Cost rate (£/hr, optional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="input"
+                  placeholder="e.g. 85.00"
+                  value={addMemberCostRate}
+                  onChange={(e) => setAddMemberCostRate(e.target.value)}
+                />
+                <p className="text-xs text-gray-400 mt-1">Updates this user&apos;s default cost rate.</p>
+              </div>
+            </div>
+            {addMemberError && <p className="text-sm text-red-600 mt-3">{addMemberError}</p>}
+            <div className="flex gap-3 mt-5">
+              <button
+                className="btn btn-primary"
+                onClick={handleAddMember}
+                disabled={addMemberLoading || !addMemberUserId}
+              >
+                {addMemberLoading ? "Adding…" : "Add to project"}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setShowAddMember(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

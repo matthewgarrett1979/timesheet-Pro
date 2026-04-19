@@ -12,7 +12,8 @@ import { Role } from "@prisma/client"
 import { z } from "zod"
 
 const assignSchema = z.object({
-  userId: z.string().cuid("Invalid user ID"),
+  userId:   z.string().cuid("Invalid user ID"),
+  costRate: z.number().positive().nullish(),
 })
 
 const removeSchema = z.object({
@@ -40,7 +41,7 @@ export async function GET(
   const assignments = await db.userProject.findMany({
     where: { projectId },
     include: {
-      user: { select: { id: true, name: true, email: true, role: true } },
+      user: { select: { id: true, name: true, email: true, role: true, costRate: true } },
     },
     orderBy: { assignedAt: "asc" },
   })
@@ -79,6 +80,14 @@ export async function POST(
   const targetUser = await db.user.findUnique({ where: { id: body.userId } })
   if (!targetUser) return NextResponse.json({ error: "User not found" }, { status: 404 })
 
+  // Optionally update the user's global cost rate
+  if (body.costRate != null) {
+    await db.user.update({
+      where: { id: body.userId },
+      data: { costRate: body.costRate },
+    })
+  }
+
   const assignment = await db.userProject.upsert({
     where: { userId_projectId: { userId: body.userId, projectId } },
     create: {
@@ -88,7 +97,7 @@ export async function POST(
     },
     update: {},
     include: {
-      user: { select: { id: true, name: true, email: true, role: true } },
+      user: { select: { id: true, name: true, email: true, role: true, costRate: true } },
     },
   })
 
