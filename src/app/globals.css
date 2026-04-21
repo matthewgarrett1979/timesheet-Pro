@@ -2,119 +2,287 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Custom CSS variables used throughout the app.
-   Theme values are overridden per-request via style="" on <html> in layout.tsx
-   (fetched from AppSettings in DB). Style attributes are not subject to CSP
-   style-src restrictions, unlike <style> tags which require a nonce. */
+/* ==========================================================================
+   Tech Timesheet — sophisticated refresh (design tokens)
+
+   Theme values are still overridden per-request via style="" on <html> in
+   layout.tsx (AppSettings from DB). The DB still controls nav-bg / accent /
+   page-bg / font — that contract is preserved. The rest of the design
+   language lives here.
+   ========================================================================== */
+
 @layer base {
   :root {
     --sidebar-width: 240px;
-    /* Theme defaults — overridden per-request from AppSettings (set on <html> in layout.tsx) */
-    --color-nav-bg:   #1e3a5f;  /* dark navy  — sidebar background  */
-    --color-accent:   #2563eb;  /* blue-600   — active items/buttons */
-    --color-page-bg:  #f9fafb;  /* gray-50    — page background      */
-    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+    /* Theme — overridden per-request from AppSettings */
+    --color-nav-bg:   #1A1F2E;  /* near-black ink — was navy */
+    --color-accent:   #4C5BD4;  /* deep indigo   — was blue-600 */
+    --color-page-bg:  #F7F5F0;  /* warm paper    — was gray-50 */
+    --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+
+    /* Design system — NOT theme-overridable, stable across the app */
+    --warm:           #C87533;  /* amber/rust for "today", highlights */
+    --ok:             #4A7C59;
+    --danger:         #B04E3B;
+    --ink:            #1A1F2E;
+    --ink-soft:       #4A5568;
+    --ink-dim:        #8492A6;
+    --paper:          #F7F5F0;
+    --paper-2:        #EFEAE0;
+    --surface:        #FFFFFF;
+    --hairline:       #D4CFC3;
+    --hairline-soft:  #E4DFD2;
+
+    /* Typography */
+    --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    --font-mono:    "IBM Plex Mono", ui-monospace, "Cascadia Code", monospace;
+
+    /* Scale */
+    --step-0: 0.8125rem;  /* 13px */
+    --step-1: 0.9375rem;  /* 15px — body */
+    --step-2: 1.125rem;   /* 18px */
+    --step-3: 1.5rem;     /* 24px — h2 */
+    --step-4: 2rem;       /* 32px */
+    --step-5: 2.75rem;    /* 44px — hero numerals */
   }
 
   body {
-    @apply text-gray-900 antialiased;
+    color: var(--ink);
     background-color: var(--color-page-bg);
     font-family: var(--font-body);
+    font-size: var(--step-1);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "cv11", "ss01";
   }
 
-  /* Focus ring for accessibility */
+  h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; }
+  h1 { font-size: var(--step-4); font-weight: 700; }
+  h2 { font-size: var(--step-3); font-weight: 600; }
+
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-blue-500;
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
   }
 }
 
+/* ==========================================================================
+   Utility atoms — small helpers used throughout
+   ========================================================================== */
+@layer utilities {
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+  .font-display { font-family: var(--font-display); }
+  .font-mono    { font-family: var(--font-mono); }
+
+  /* Kicker — small monospace labels ("MY · PROJECTS", "TS · W16 · DRAFT") */
+  .ds-kicker {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  .ds-dim  { color: var(--ink-dim); }
+  .ds-soft { color: var(--ink-soft); }
+  .ds-num  { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.02em; }
+
+  .ds-hairline       { border-color: var(--hairline); }
+  .ds-hairline-soft  { border-color: var(--hairline-soft); }
+}
+
+/* ==========================================================================
+   Components — reused UI atoms
+   ========================================================================== */
 @layer components {
-  /* Status badges */
-  .badge {
-    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
-  }
-  .badge-draft      { @apply bg-gray-100 text-gray-700; }
-  .badge-submitted  { @apply bg-yellow-100 text-yellow-800; }
-  .badge-approved   { @apply bg-green-100 text-green-800; }
-  .badge-rejected   { @apply bg-red-100 text-red-800; }
-  .badge-invoiced   { @apply bg-blue-100 text-blue-800; }
-  .badge-sent       { @apply bg-purple-100 text-purple-800; }
-  .badge-paid       { @apply bg-emerald-100 text-emerald-800; }
-  .badge-admin      { @apply bg-indigo-100 text-indigo-800; }
-  .badge-manager    { @apply bg-slate-100 text-slate-700; }
 
-  /* Card */
+  /* --- Cards --- */
   .card {
-    @apply bg-white rounded-lg shadow-sm border border-gray-200;
+    background: var(--surface);
+    border: 1px solid var(--hairline-soft);
+    border-radius: 8px;
+    box-shadow: 0 1px 0 rgba(26, 31, 46, 0.02);
+  }
+  .card-head {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 16px;
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--hairline-soft);
+  }
+  .card-code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    font-weight: 500;
+    margin-bottom: 2px;
   }
 
-  /* Table */
-  .data-table {
-    @apply min-w-full divide-y divide-gray-200;
+  /* --- Badges (status pills) --- */
+  .badge {
+    display: inline-flex; align-items: center;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
   }
-  .data-table thead tr { @apply bg-gray-50; }
+  .badge-draft     { background: #EFEAE0; color: #4A5568; border-color: #D4CFC3; }
+  .badge-submitted { background: #FDF4E3; color: #8B5A1E; border-color: #E9D4A4; }
+  .badge-approved  { background: #E7EFE8; color: #2E5A3E; border-color: #B6CDB8; }
+  .badge-rejected  { background: #F5E1DC; color: #7A2D20; border-color: #E4B7AC; }
+  .badge-invoiced  { background: #E1E4F5; color: #2C3680; border-color: #B7BEE5; }
+  .badge-sent      { background: #E8DEF0; color: #5B2D7E; border-color: #C5AFD4; }
+  .badge-paid      { background: #DDE9DF; color: #2A5A3A; border-color: #ADCAAE; }
+  .badge-admin     { background: #E1E4F5; color: #2C3680; border-color: #B7BEE5; }
+  .badge-manager   { background: #EFEAE0; color: #4A5568; border-color: #D4CFC3; }
+
+  /* --- Tables --- */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .data-table thead tr { background: var(--paper-2); }
   .data-table th {
-    @apply px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider;
+    padding: 10px 16px;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    border-bottom: 1px solid var(--hairline);
   }
   .data-table td {
-    @apply px-4 py-3 text-sm text-gray-700 whitespace-nowrap;
+    padding: 12px 16px;
+    font-size: var(--step-1);
+    color: var(--ink);
+    border-bottom: 1px solid var(--hairline-soft);
   }
-  .data-table tbody tr {
-    @apply hover:bg-gray-50 transition-colors;
-  }
-  .data-table tbody { @apply divide-y divide-gray-100; }
+  .data-table tbody tr:hover { background: color-mix(in srgb, var(--paper-2) 50%, transparent); }
+  .data-table tbody tr:last-child td { border-bottom: 0; }
 
-  /* Buttons */
+  /* --- Buttons --- */
   .btn {
-    @apply inline-flex items-center gap-2 rounded-md px-3.5 py-2 text-sm font-medium transition-colors focus-visible:outline-none;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-family: var(--font-body);
+    font-size: var(--step-0);
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    transition: all 120ms cubic-bezier(.22,.61,.36,1);
+    cursor: pointer;
+    border: 1px solid transparent;
+    line-height: 1.25;
   }
   .btn-primary {
-    @apply btn text-white;
-    background-color: var(--color-accent, #2563eb);
+    background-color: var(--color-accent);
+    color: white;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.08);
   }
-  .btn-primary:hover  { filter: brightness(0.88); }
-  .btn-primary:active { filter: brightness(0.78); }
+  .btn-primary:hover   { filter: brightness(1.08); }
+  .btn-primary:active  { filter: brightness(0.92); }
   .btn-secondary {
-    @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50;
+    background: var(--surface);
+    color: var(--ink);
+    border-color: var(--hairline);
   }
+  .btn-secondary:hover { background: var(--paper-2); border-color: var(--ink-dim); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--ink-soft);
+  }
+  .btn-ghost:hover { background: var(--paper-2); color: var(--ink); }
   .btn-danger {
-    @apply btn bg-red-600 text-white hover:bg-red-700;
+    background: var(--danger); color: white;
   }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
 
-  /* Form inputs */
+  /* --- Form inputs --- */
   .input {
-    @apply block w-full rounded-md border border-gray-300 px-3 py-2 text-sm
-           placeholder-gray-400 shadow-sm
-           focus:border-blue-500 focus:ring-1 focus:ring-blue-500
-           disabled:bg-gray-50 disabled:text-gray-500;
+    display: block; width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    font-family: var(--font-body);
+    font-size: var(--step-1);
+    color: var(--ink);
+    background: var(--surface);
+    transition: border-color 120ms, box-shadow 120ms;
   }
+  .input::placeholder { color: var(--ink-dim); }
+  .input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 15%, transparent);
+  }
+  .input:disabled { background: var(--paper-2); color: var(--ink-dim); }
+
   .label {
-    @apply block text-sm font-medium text-gray-700 mb-1;
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
   }
 
-  /* Modal overlay */
+  /* --- Modal --- */
   .modal-backdrop {
-    @apply fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4;
+    position: fixed; inset: 0;
+    background: rgba(26, 31, 46, 0.5);
+    backdrop-filter: blur(2px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 50;
+    padding: 16px;
   }
   .modal-box {
-    @apply bg-white rounded-xl shadow-xl w-full max-w-lg;
+    background: var(--surface);
+    border-radius: 12px;
+    box-shadow: 0 24px 48px -12px rgba(26, 31, 46, 0.25);
+    width: 100%; max-width: 560px;
+    border: 1px solid var(--hairline-soft);
   }
 
-  /* Responsive table wrapper — horizontal scroll on small screens */
+  /* --- Responsive table wrapper --- */
   .table-responsive {
-    @apply overflow-x-auto -mx-4 sm:mx-0;
+    overflow-x: auto;
+    margin-left: -16px; margin-right: -16px;
   }
-  .table-responsive .data-table {
-    @apply min-w-[600px];
+  @media (min-width: 640px) {
+    .table-responsive { margin-left: 0; margin-right: 0; }
   }
+  .table-responsive .data-table { min-width: 600px; }
 
-  /* Stacked form grid for small screens */
+  /* --- Form grid --- */
   .form-grid {
-    @apply grid grid-cols-1 sm:grid-cols-2 gap-4;
+    display: grid; grid-template-columns: 1fr; gap: 16px;
+  }
+  @media (min-width: 640px) {
+    .form-grid { grid-template-columns: 1fr 1fr; }
   }
 
-  /* Touch-friendly minimum target size */
-  .touch-target {
-    @apply min-h-[44px] min-w-[44px];
+  /* --- Touch target --- */
+  .touch-target { min-height: 44px; min-width: 44px; }
+
+  /* --- Link style --- */
+  .link {
+    color: var(--color-accent);
+    text-decoration: none;
+    font-weight: 500;
+    border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+    transition: border-color 120ms;
   }
+  .link:hover { border-bottom-color: var(--color-accent); }
 }

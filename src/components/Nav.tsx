@@ -37,13 +37,12 @@ const SETTINGS_ITEMS: NavItem[] = [
 ]
 
 export default function Nav({ user, version }: { user: NavUser; version: string }) {
-  const pathname    = usePathname()
-  const router      = useRouter()
-  const [signingOut,    setSigningOut]    = useState(false)
-  const [timerRunning,  setTimerRunning]  = useState(false)
-  const [mobileOpen,    setMobileOpen]    = useState(false)
+  const pathname = usePathname()
+  const router   = useRouter()
+  const [signingOut,   setSigningOut]   = useState(false)
+  const [timerRunning, setTimerRunning] = useState(false)
+  const [mobileOpen,   setMobileOpen]   = useState(false)
 
-  // Close mobile menu on route change
   useEffect(() => { setMobileOpen(false) }, [pathname])
 
   useEffect(() => {
@@ -53,12 +52,8 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
         if (raw) {
           const state = JSON.parse(raw)
           setTimerRunning(!!(state && state.startTime))
-        } else {
-          setTimerRunning(false)
-        }
-      } catch {
-        setTimerRunning(false)
-      }
+        } else setTimerRunning(false)
+      } catch { setTimerRunning(false) }
     }
     checkTimer()
     const interval = setInterval(checkTimer, 5000)
@@ -89,13 +84,21 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
 
   const navContent = (
     <>
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-white/10 flex items-center justify-between">
-        <span className="text-lg font-bold text-white tracking-tight">Tech Timesheet</span>
-        {/* Close button — mobile only */}
+      {/* Wordmark */}
+      <div className="px-5 py-5 flex items-center justify-between"
+           style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+        <div>
+          <div className="font-mono" style={{ fontSize: 9, letterSpacing: "0.18em", color: "rgba(255,255,255,0.5)", textTransform: "uppercase", fontWeight: 500, marginBottom: 2 }}>
+            Tech · Timesheet
+          </div>
+          <div className="font-display text-white" style={{ fontSize: 18, fontWeight: 600, letterSpacing: "-0.02em" }}>
+            Ledger
+          </div>
+        </div>
         <button
           onClick={() => setMobileOpen(false)}
-          className="md:hidden text-slate-300 hover:text-white p-1 -mr-1 min-h-[44px] min-w-[44px] flex items-center justify-center"
+          className="md:hidden touch-target flex items-center justify-center"
+          style={{ color: "rgba(255,255,255,0.7)" }}
           aria-label="Close menu"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -106,52 +109,66 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
 
       {/* Main nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {visibleNavItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={`flex items-center px-3 py-2.5 rounded-md text-sm font-medium transition-colors min-h-[44px] ${
-              isActive(item.href)
-                ? "text-white"
-                : "text-slate-300 hover:bg-white/10 hover:text-white"
-            }`}
-            style={isActive(item.href) ? { backgroundColor: "var(--color-accent, #2563eb)" } : undefined}
-          >
-            <span className="flex-1">{item.label}</span>
-            {item.href === "/time-entries" && timerRunning && (
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-auto" />
-            )}
-          </Link>
-        ))}
-
-        {/* Settings section */}
-        <div className="pt-4">
-          <p className="px-3 mb-1 text-xs font-semibold uppercase tracking-wider text-slate-500">
-            Settings
-          </p>
-          {visibleSettingsItems.map((item) => (
+        {visibleNavItems.map((item) => {
+          const active = isActive(item.href)
+          return (
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center px-3 py-2.5 rounded-md text-sm font-medium transition-colors min-h-[44px] ${
-                isActive(item.href)
-                  ? "text-white"
-                  : "text-slate-300 hover:bg-white/10 hover:text-white"
-              }`}
-              style={isActive(item.href) ? { backgroundColor: "var(--color-accent, #2563eb)" } : undefined}
+              className="flex items-center px-3 py-2 rounded-md transition-colors touch-target"
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                letterSpacing: "-0.005em",
+                color: active ? "white" : "rgba(255,255,255,0.7)",
+                backgroundColor: active ? "var(--color-accent)" : "transparent",
+                boxShadow: active ? "inset 0 1px 0 rgba(255,255,255,0.08)" : undefined,
+              }}
             >
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {item.href === "/time-entries" && timerRunning && (
+                <span className="w-2 h-2 rounded-full animate-pulse ml-auto"
+                      style={{ backgroundColor: "var(--warm, #C87533)" }}/>
+              )}
             </Link>
-          ))}
+          )
+        })}
+
+        {/* Settings section */}
+        <div className="pt-6">
+          <p className="px-3 mb-2 font-mono"
+             style={{ fontSize: 10, letterSpacing: "0.14em", color: "rgba(255,255,255,0.4)", textTransform: "uppercase", fontWeight: 500 }}>
+            Settings
+          </p>
+          {visibleSettingsItems.map((item) => {
+            const active = isActive(item.href)
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center px-3 py-2 rounded-md transition-colors touch-target"
+                style={{
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: active ? "white" : "rgba(255,255,255,0.7)",
+                  backgroundColor: active ? "var(--color-accent)" : "transparent",
+                }}
+              >
+                {item.label}
+              </Link>
+            )
+          })}
         </div>
       </nav>
 
       {/* User footer */}
-      <div className="px-4 py-4 border-t border-white/10">
-        <div className="mb-2">
-          <p className="text-sm font-medium text-white truncate">{user.name}</p>
-          <p className="text-xs text-slate-400 truncate">{user.email}</p>
-          <span className={`badge mt-1 ${
+      <div className="px-4 py-4" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className="mb-3">
+          <p className="text-white truncate" style={{ fontSize: 14, fontWeight: 500 }}>{user.name}</p>
+          <p className="truncate font-mono" style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 2 }}>
+            {user.email}
+          </p>
+          <span className={`badge mt-2 ${
             user.role === "ADMIN" ? "badge-admin" :
             user.role === "MANAGER" ? "badge-manager" :
             "badge-draft"
@@ -162,11 +179,15 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
         <button
           onClick={handleSignOut}
           disabled={signingOut}
-          className="w-full text-left text-xs text-slate-400 hover:text-white transition-colors py-1 min-h-[44px] flex items-center"
+          className="w-full text-left touch-target flex items-center transition-colors font-mono"
+          style={{ fontSize: 11, letterSpacing: "0.08em", color: "rgba(255,255,255,0.5)", textTransform: "uppercase" }}
         >
-          {signingOut ? "Signing out…" : "Sign out"}
+          {signingOut ? "Signing out…" : "Sign out ↗"}
         </button>
-        <p className="text-xs text-slate-600 mt-1 select-none">v{version}</p>
+        <p className="font-mono select-none"
+           style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 6, letterSpacing: "0.08em" }}>
+          v{version}
+        </p>
       </div>
     </>
   )
@@ -175,13 +196,19 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
     <>
       {/* Mobile top bar */}
       <div
-        className="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 py-3 border-b border-white/10"
-        style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
+        className="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-4 py-3"
+        style={{
+          backgroundColor: "var(--color-nav-bg)",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
+        }}
       >
-        <span className="text-base font-bold text-white tracking-tight">Tech Timesheet</span>
+        <span className="font-display text-white" style={{ fontSize: 16, fontWeight: 600, letterSpacing: "-0.02em" }}>
+          Ledger
+        </span>
         <button
           onClick={() => setMobileOpen(true)}
-          className="text-slate-300 hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center"
+          className="touch-target flex items-center justify-center"
+          style={{ color: "rgba(255,255,255,0.7)" }}
           aria-label="Open menu"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -190,15 +217,11 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
         </button>
       </div>
 
-      {/* Mobile drawer overlay */}
       {mobileOpen && (
-        <div
-          className="md:hidden fixed inset-0 z-50 bg-black/50"
-          onClick={() => setMobileOpen(false)}
-        >
+        <div className="md:hidden fixed inset-0 z-50" style={{ backgroundColor: "rgba(0,0,0,0.5)" }} onClick={() => setMobileOpen(false)}>
           <aside
-            className="flex flex-col w-72 h-full text-slate-200 shadow-2xl"
-            style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
+            className="flex flex-col w-72 h-full shadow-2xl"
+            style={{ backgroundColor: "var(--color-nav-bg)" }}
             onClick={(e) => e.stopPropagation()}
           >
             {navContent}
@@ -208,8 +231,8 @@ export default function Nav({ user, version }: { user: NavUser; version: string 
 
       {/* Desktop sidebar */}
       <aside
-        className="hidden md:flex flex-col w-60 min-h-screen text-slate-200 shrink-0"
-        style={{ backgroundColor: "var(--color-nav-bg, #1e293b)" }}
+        className="hidden md:flex flex-col w-60 min-h-screen shrink-0"
+        style={{ backgroundColor: "var(--color-nav-bg)" }}
       >
         {navContent}
       </aside>
