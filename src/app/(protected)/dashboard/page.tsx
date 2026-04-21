@@ -6,6 +6,10 @@ import Link from "next/link"
 import { Prisma, Role } from "@prisma/client"
 import PersonalCalendar from "@/components/PersonalCalendar"
 import TeamAllocationCalendar from "@/components/TeamAllocationCalendar"
+import { AnimatedNumber } from "@/components/charts/AnimatedNumber"
+import { LogTimeWidget } from "@/components/dashboard/LogTimeWidget"
+import { WeekBars } from "@/components/charts/WeekBars"
+import { Sparkline, UtilDial } from "@/components/charts/Sparkline"
 
 export const dynamic = "force-dynamic"
 
@@ -29,6 +33,10 @@ function addDays(d: Date, n: number): Date {
 }
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+function getTodayIndex(date: Date): number {
+  return (date.getDay() || 7) - 1
+}
 
 const STATUS_CLS: Record<string, string> = {
   DRAFT: "badge-draft", SUBMITTED: "badge-submitted",
@@ -94,6 +102,26 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
   })
   const weekTotal = weekByDay.reduce((s, h) => s + h, 0)
   const target = 37.5
+  const todayIndex = getTodayIndex(now)
+
+  async function handleLogTime(entry: {
+    projectId: string
+    hours: number
+    note?: string
+    date: string
+  }) {
+    "use server"
+
+    await db.timeEntry.create({
+      data: {
+        managerId: userId,
+        projectId: entry.projectId,
+        hours: entry.hours,
+        description: entry.note || "",
+        date: new Date(entry.date),
+      },
+    })
+  }
 
   return (
     <div className="p-4 sm:p-8 max-w-6xl mx-auto space-y-6">
@@ -111,6 +139,15 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
         <Link href="/time-entries" className="btn btn-primary">Log time →</Link>
       </div>
 
+      <LogTimeWidget
+        projects={myProjects.map((p) => ({
+          id: p.project.id,
+          name: p.project.name,
+          client: p.project.client.name,
+        }))}
+        onSubmit={handleLogTime}
+      />
+
       {/* Today / Week / Projects */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Today */}
@@ -118,7 +155,7 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
           <Kicker>TODAY</Kicker>
           <div style={{ fontSize: 44, fontWeight: 600, letterSpacing: "-0.03em", marginTop: 4 }}
                className="ds-num tabular-nums">
-            {todayHours.toFixed(1)}<span className="ds-dim" style={{ fontSize: 20, fontWeight: 500 }}>h</span>
+            <AnimatedNumber value={todayHours} decimals={1} /><span className="ds-dim" style={{ fontSize: 20, fontWeight: 500 }}>h</span>
           </div>
           <div className="relative h-1 rounded-full mt-3" style={{ background: "var(--hairline-soft)" }}>
             <div className="absolute inset-y-0 left-0 rounded-full"
@@ -134,26 +171,10 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
           <Kicker>THIS WEEK</Kicker>
           <div style={{ fontSize: 44, fontWeight: 600, letterSpacing: "-0.03em", marginTop: 4 }}
                className="ds-num tabular-nums">
-            {weekTotal.toFixed(1)}<span className="ds-dim" style={{ fontSize: 20, fontWeight: 500 }}>h</span>
+            <AnimatedNumber value={weekTotal} decimals={1} /><span className="ds-dim" style={{ fontSize: 20, fontWeight: 500 }}>h</span>
           </div>
-          <div className="flex items-end gap-1.5 mt-3" style={{ height: 36 }}>
-            {weekByDay.slice(0,5).map((h, i) => {
-              const isToday = addDays(thisMonday, i).toDateString() === now.toDateString()
-              const pct = Math.max(6, (h / 10) * 100)
-              return (
-                <div key={i} className="flex-1 flex flex-col items-center justify-end">
-                  <div style={{
-                    width: "100%",
-                    height: `${pct}%`,
-                    background: h > 0 ? (isToday ? "var(--warm)" : "var(--color-accent)") : "var(--hairline-soft)",
-                    borderRadius: 2,
-                  }}/>
-                </div>
-              )
-            })}
-          </div>
-          <div className="flex justify-between mt-1 font-mono" style={{ fontSize: 9, color: "var(--ink-dim)", letterSpacing: "0.08em" }}>
-            {["M","T","W","T","F"].map((d, i) => <span key={i}>{d}</span>)}
+          <div className="mt-3">
+            <WeekBars days={weekByDay.slice(0, 5)} todayIndex={todayIndex} />
           </div>
         </div>
 
@@ -162,7 +183,7 @@ async function UserDashboard({ userId, name }: { userId: string; name: string })
           <Kicker>ASSIGNMENTS</Kicker>
           <div style={{ fontSize: 44, fontWeight: 600, letterSpacing: "-0.03em", marginTop: 4 }}
                className="ds-num tabular-nums">
-            {myProjects.length}
+            <AnimatedNumber value={myProjects.length} />
           </div>
           <div className="ds-dim" style={{ fontSize: 13, marginTop: 4 }}>active projects</div>
           <Link href="/projects" className="link mt-3 inline-block" style={{ fontSize: 12 }}>
@@ -271,8 +292,9 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
   const lastMonday = addDays(thisMonday, -7)
   const thisSunday = addDays(thisMonday, 6); thisSunday.setHours(23, 59, 59, 999)
   const lastSunday = addDays(lastMonday, 6); lastSunday.setHours(23, 59, 59, 999)
+  const eightWeeksAgo = addDays(thisMonday, -7 * 7)
 
-  const [r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13] = await Promise.allSettled([
+  const [r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14] = await Promise.allSettled([
     db.client.count({ where: scope }),
     db.project.count({ where: { ...scope, active: true } }),
     db.timesheet.count({ where: { ...scope, status: "DRAFT" } }),
@@ -290,9 +312,16 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
     db.timesheet.count({ where: { ...scope, status: "PARTIALLY_APPROVED" } }),
     db.timeEntry.findMany({ where: { date: { gte: thisMonday, lte: thisSunday } }, select: { managerId: true, hours: true, date: true } }),
     db.user.findMany({ where: isAdmin ? {} : { userProjects: { some: { project: { managerId: userId } } } }, select: { id: true, name: true, role: true }, take: 20 }),
+    db.timeEntry.findMany({
+      where: {
+        ...(isAdmin ? {} : { managerId: userId }),
+        date: { gte: eightWeeksAgo, lte: thisSunday },
+      },
+      select: { hours: true, date: true },
+    }),
   ] as const)
 
-  ;[r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13].forEach((r, i) => {
+  ;[r0,r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14].forEach((r, i) => {
     if (r.status === "rejected") console.error(`[dashboard] query[${i}] failed:`, r.reason)
   })
 
@@ -336,6 +365,24 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
   })
   const unallocatedUsers = teamUsers.filter((u) => (teamCalendar[u.id] ?? []).every((h) => h === 0))
 
+  type WeeklyTrendEntry = { hours: Prisma.Decimal | number; date: Date }
+  const weeklyTrendEntries = settled(r14, []) as WeeklyTrendEntry[]
+
+  const sparkline = Array.from({ length: 8 }, (_, i) => {
+    const start = addDays(thisMonday, -7 * (7 - i))
+    const end = addDays(start, 6)
+    end.setHours(23, 59, 59, 999)
+
+    const total = weeklyTrendEntries
+      .filter((e) => {
+        const d = new Date(e.date)
+        return d >= start && d <= end
+      })
+      .reduce((sum, e) => sum + Number(e.hours), 0)
+
+    return Number(total.toFixed(1))
+  })
+
   const stats = [
     { label: "Clients",            value: clientCount,      href: "/clients" },
     { label: "Active projects",    value: projectCount,     href: "/projects" },
@@ -369,7 +416,7 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
           <Link key={s.label} href={s.href} className="card p-4 transition-shadow hover:shadow-sm block">
             <div className="ds-kicker" style={{ marginBottom: 6 }}>{s.label}</div>
             <div className="ds-num tabular-nums" style={{ fontSize: 28, fontWeight: 600, letterSpacing: "-0.02em" }}>
-              {s.value}
+              <AnimatedNumber value={s.value} />
             </div>
           </Link>
         ))}
@@ -380,7 +427,10 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
         <div className="card p-4">
           <Kicker>HOURS · WK</Kicker>
           <div className="ds-num tabular-nums" style={{ fontSize: 28, fontWeight: 600, marginTop: 6 }}>
-            {thisWeekHours.toFixed(1)}<span className="ds-dim" style={{ fontSize: 14, fontWeight: 500 }}>h</span>
+            <AnimatedNumber value={thisWeekHours} decimals={1} /><span className="ds-dim" style={{ fontSize: 14, fontWeight: 500 }}>h</span>
+          </div>
+          <div className="mt-3">
+            <Sparkline points={sparkline} width={140} height={32} />
           </div>
           {hoursChange !== null && (
             <div className="font-mono tabular-nums" style={{ fontSize: 11, marginTop: 4, color: hoursChange >= 0 ? "var(--ok)" : "var(--danger)", fontWeight: 500 }}>
@@ -391,13 +441,13 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
         <div className="card p-4">
           <Kicker>HOURS · LAST WK</Kicker>
           <div className="ds-num tabular-nums" style={{ fontSize: 28, fontWeight: 600, marginTop: 6 }}>
-            {lastWeekHours.toFixed(1)}<span className="ds-dim" style={{ fontSize: 14, fontWeight: 500 }}>h</span>
+            <AnimatedNumber value={lastWeekHours} decimals={1} /><span className="ds-dim" style={{ fontSize: 14, fontWeight: 500 }}>h</span>
           </div>
         </div>
         <div className="card p-4">
           <Kicker>UNINVOICED · £</Kicker>
           <div className="ds-num tabular-nums" style={{ fontSize: 28, fontWeight: 600, marginTop: 6 }}>
-            £{uninvoicedValue.toLocaleString("en-GB", { maximumFractionDigits: 0 })}
+            £<AnimatedNumber value={uninvoicedValue} decimals={0} />
           </div>
           <Link href="/invoices" className="link" style={{ fontSize: 11, marginTop: 4, display: "inline-block" }}>
             Create invoice →
@@ -410,7 +460,7 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
             fontSize: 28, fontWeight: 600, marginTop: 6,
             color: projectsAtRiskCount > 0 ? "var(--warm)" : "var(--ink)"
           }}>
-            {projectsAtRiskCount}
+            <AnimatedNumber value={projectsAtRiskCount} />
           </div>
           {projectsAtRiskCount > 0 && (
             <div className="font-mono" style={{ fontSize: 10, marginTop: 4, color: "var(--warm)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
@@ -463,7 +513,12 @@ async function ManagerDashboard({ userId, name, isAdmin }: { userId: string; nam
                         )
                       })}
                       <td className="tabular-nums" style={{ textAlign: "right", fontWeight: 600, color: total === 0 ? "var(--warm)" : "var(--ink)" }}>
-                        {total.toFixed(1)}h
+                        <div className="flex items-center justify-end gap-3">
+                          <div style={{ width: 28, height: 28 }}>
+                            <UtilDial pct={total / 37.5} size={28} />
+                          </div>
+                          <span><AnimatedNumber value={total} decimals={1} />h</span>
+                        </div>
                       </td>
                     </tr>
                   )
