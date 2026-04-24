@@ -1,18 +1,39 @@
 "use client"
 
-import { useState, Suspense } from "react"
+import { useState, useEffect, Suspense } from "react"
 import { signIn } from "next-auth/react"
 import { useRouter, useSearchParams } from "next/navigation"
 
-function LoginForm() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [error, setError] = useState("")
-  const [loading, setLoading] = useState(false)
+interface OrgInfo {
+  configured: boolean
+  orgName: string | null
+  domain: string | null
+}
 
-  const router = useRouter()
+function LoginForm() {
+  const [email, setEmail]       = useState("")
+  const [password, setPassword] = useState("")
+  const [error, setError]       = useState("")
+  const [loading, setLoading]   = useState(false)
+  const [org, setOrg]           = useState<OrgInfo | null>(null)
+
+  const router       = useRouter()
   const searchParams = useSearchParams()
-  const callbackUrl = searchParams.get("callbackUrl") ?? "/dashboard"
+  const callbackUrl  = searchParams.get("callbackUrl") ?? "/dashboard"
+  const emailParam   = searchParams.get("email") ?? ""
+
+  // Pre-fill email from URL param (set by setup wizard on completion)
+  useEffect(() => {
+    if (emailParam) setEmail(emailParam)
+  }, [emailParam])
+
+  // Fetch org info for display
+  useEffect(() => {
+    fetch("/api/setup")
+      .then(r => r.json())
+      .then((data: OrgInfo) => setOrg(data))
+      .catch(() => {})
+  }, [])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -36,7 +57,6 @@ function LoginForm() {
       return
     }
 
-    // Success — next-auth set the session; middleware will redirect to /mfa if needed
     router.push(callbackUrl)
     router.refresh()
   }
@@ -47,7 +67,11 @@ function LoginForm() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-900">Tech Timesheet</h1>
-          <p className="mt-1 text-sm text-gray-500">Sign in to your account</p>
+          {org?.orgName ? (
+            <p className="mt-1 text-sm text-gray-500">Signing in to <span className="font-medium text-gray-700">{org.orgName}</span></p>
+          ) : (
+            <p className="mt-1 text-sm text-gray-500">Sign in to your account</p>
+          )}
         </div>
 
         <div className="card p-6">
@@ -70,6 +94,9 @@ function LoginForm() {
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={loading}
               />
+              {org?.domain && (
+                <p className="mt-1 text-xs text-gray-400">Use your <span className="font-mono">@{org.domain}</span> email address</p>
+              )}
             </div>
 
             <div>

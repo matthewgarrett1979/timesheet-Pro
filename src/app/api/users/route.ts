@@ -70,6 +70,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 })
   }
 
+  // Domain restriction — new users must match the registered organisation domain
+  const orgSettings = await db.appSettings.findUnique({
+    where: { id: "global" },
+    select: { organizationDomain: true, domainVerifiedAt: true },
+  })
+  if (orgSettings?.organizationDomain && orgSettings?.domainVerifiedAt) {
+    const emailDomain = body.email.split("@")[1]?.toLowerCase() ?? ""
+    if (emailDomain !== orgSettings.organizationDomain.toLowerCase()) {
+      return NextResponse.json(
+        { error: `Email must use @${orgSettings.organizationDomain}` },
+        { status: 400 }
+      )
+    }
+  }
+
   const existing = await db.user.findUnique({ where: { email: body.email.toLowerCase() } })
   if (existing) {
     return NextResponse.json({ error: "Email already in use" }, { status: 409 })

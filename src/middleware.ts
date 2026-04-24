@@ -2,20 +2,29 @@
  * Next.js Edge Middleware — runs before every request.
  *
  * Responsibilities (in order):
- *   1. Security headers on every response (CSP, HSTS, Permissions-Policy, etc.)
- *   2. Authentication gate — redirect unauthenticated requests to /login
- *   3. MFA gate — redirect MFA-pending sessions to /mfa
- *   4. ADMIN-only route enforcement
+ *   1. Setup gate — redirect to /setup if first-run cookie is absent
+ *   2. Security headers on every response (CSP, HSTS, Permissions-Policy, etc.)
+ *   3. Authentication gate — redirect unauthenticated requests to /login
+ *   4. MFA gate — redirect MFA-pending sessions to /mfa
+ *   5. ADMIN-only route enforcement
  *
  * Rate limiting is handled per-route via Arcjet (see src/lib/rate-limit.ts).
  * This middleware runs on the Edge Runtime (no Node.js APIs).
+ *
+ * First-run detection: the POST /api/setup handler sets an `app_configured`
+ * cookie on successful setup. Middleware checks for this cookie; if absent,
+ * all non-setup/non-static paths are redirected to /setup.
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getToken } from "next-auth/jwt"
 
+const SETUP_PATH = "/setup"
+
 // Routes that do NOT require authentication
 const PUBLIC_PATHS = [
   "/login",
+  "/setup",
+  "/api/setup",   // setup wizard APIs are public (no session exists yet)
   "/api/auth",
   "/api/approvals", // approval links are token-protected, not session-protected
   "/_next",
@@ -44,7 +53,26 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // ------------------------------------------------------------------
-  // 1. Build the response (may be a redirect or pass-through)
+  // 1. Setup gate — must run before everything else.
+  //    If the app_configured cookie is absent and this is not already
+  //    a setup/static path, redirect to /setup.
+  // ------------------------------------------------------------------
+  const isSetupPath = pathname === SETUP_PATH || pathname.startsWith(SETUP_PATH + "/")
+  const isApiSetup  = pathname.startsWith("/api/setup")
+  const isStatic    = pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname === "/robots.txt"
+
+  if (!isSetupPath && !isApiSetup && !isStatic) {
+    const configured = req.cookies.get("app_configured")?.value
+    if (!configured) {
+      const setupUrl = req.nextUrl.clone()
+      setupUrl.pathname = SETUP_PATH
+      setupUrl.search = ""
+      return NextResponse.redirect(setupUrl)
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // 2. Build the response (may be a redirect or pass-through)
   // ------------------------------------------------------------------
   let response: NextResponse
 
@@ -106,7 +134,7 @@ export async function middleware(req: NextRequest) {
   }
 
   // ------------------------------------------------------------------
-  // 2. Security headers — applied to every response, including redirects
+  // 3. Security headers — applied to every response, including redirects
   // ------------------------------------------------------------------
   applySecurityHeaders(response, req)
 

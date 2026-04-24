@@ -33,6 +33,7 @@ const SETTINGS_ITEMS: NavItem[] = [
   { href: "/settings/categories",     label: "Time Categories", roles: ["ADMIN"] },
   { href: "/settings/notifications",  label: "Notifications",   roles: ["ADMIN"] },
   { href: "/settings/users",          label: "Users",           roles: ["ADMIN"] },
+  { href: "/settings/organisation",   label: "Organisation",    roles: ["ADMIN"] },
   { href: "/settings/audit",          label: "Audit Log",       roles: ["ADMIN"] },
 ]
 

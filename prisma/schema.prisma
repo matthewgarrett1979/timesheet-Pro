@@ -516,6 +516,19 @@ model AppSettings {
   nextInvoiceNumber    Int     @default(1)
   defaultPaymentTerms  Int     @default(30)
 
+  // Domain tenancy and setup
+  organizationDomain       String?
+  domainVerifiedAt         DateTime?
+  domainVerificationToken  String?
+
+  // Licensing
+  licenceSeats              Int     @default(5)
+  feature_po                Boolean @default(true)
+  feature_resource_planning Boolean @default(true)
+  feature_expenses          Boolean @default(true)
+  feature_xero              Boolean @default(false)
+  feature_onedrive          Boolean @default(false)
+
   updatedAt       DateTime @updatedAt
 }
 

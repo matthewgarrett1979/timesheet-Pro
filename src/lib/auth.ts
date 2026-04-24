@@ -89,6 +89,30 @@ export const authOptions: NextAuthOptions = {
             throw new Error("AccountLocked")
           }
 
+          // Domain restriction — reject logins from outside the registered domain
+          const orgSettings = await db.appSettings.findUnique({
+            where: { id: "global" },
+            select: { organizationDomain: true, domainVerifiedAt: true },
+          })
+          if (orgSettings?.organizationDomain && orgSettings?.domainVerifiedAt) {
+            const emailDomain = email.split("@")[1]?.toLowerCase() ?? ""
+            if (emailDomain !== orgSettings.organizationDomain.toLowerCase()) {
+              try {
+                await audit({
+                  userId: user.id,
+                  action: AuditAction.USER_LOGIN_FAILED,
+                  resource: "auth",
+                  resourceId: user.id,
+                  metadata: { reason: "domain_mismatch", emailDomain, allowedDomain: orgSettings.organizationDomain },
+                  ipAddress: ip,
+                  userAgent: ua,
+                  success: false,
+                })
+              } catch {}
+              return null
+            }
+          }
+
           const valid = await verifyPassword(credentials.password, user.passwordHash)
 
           if (!valid) {
