@@ -41,6 +41,15 @@ export default function UsersPage() {
   const [userProjects, setUserProjects] = useState<Record<string, UserProject[]>>({})
   const [allProjects, setAllProjects] = useState<Project[]>([])
 
+  // Delete state
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
+  const [deleteCounts, setDeleteCounts] = useState<Record<string, number> | null>(null)
+  const [deleteAction, setDeleteAction] = useState<"reassign" | "delete_records" | "">("")
+  const [deleteReassignTo, setDeleteReassignTo] = useState("")
+  const [deleteConfirmEmail, setDeleteConfirmEmail] = useState("")
+  const [deleteInProgress, setDeleteInProgress] = useState(false)
+  const [deleteError, setDeleteError] = useState("")
+
   useEffect(() => {
     if (session && session.user.role !== "ADMIN") {
       router.replace("/settings")
@@ -66,6 +75,53 @@ export default function UsersPage() {
       body: JSON.stringify({ unlock: true }),
     })
     load()
+  }
+
+  function openDelete(u: User) {
+    setDeleteTarget(u)
+    setDeleteCounts(null)
+    setDeleteAction("")
+    setDeleteReassignTo("")
+    setDeleteConfirmEmail("")
+    setDeleteError("")
+  }
+
+  function closeDelete() {
+    setDeleteTarget(null)
+    setDeleteCounts(null)
+    setDeleteAction("")
+    setDeleteReassignTo("")
+    setDeleteConfirmEmail("")
+    setDeleteError("")
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleteInProgress(true)
+    setDeleteError("")
+
+    const body: Record<string, unknown> = { confirmEmail: deleteConfirmEmail }
+    if (deleteAction) body.action = deleteAction
+    if (deleteAction === "reassign") body.reassignToUserId = deleteReassignTo
+
+    const res = await fetch(`/api/users/${deleteTarget.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    setDeleteInProgress(false)
+
+    if (res.status === 204) {
+      closeDelete()
+      load()
+    } else if (res.status === 409) {
+      const data = await res.json().catch(() => ({}))
+      if (data.counts) setDeleteCounts(data.counts)
+      else setDeleteError(data.error ?? "Cannot delete user.")
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setDeleteError(data.error ?? "Failed to delete user.")
+    }
   }
 
   async function loadUserProjects(userId: string) {
@@ -199,6 +255,14 @@ export default function UsersPage() {
                             {isExpanded ? "Hide" : "Projects"}
                           </button>
                         )}
+                        {u.id !== session?.user?.id && (
+                          <button
+                            onClick={() => openDelete(u)}
+                            className="text-sm text-red-500 hover:underline"
+                          >
+                            Delete
+                          </button>
+                        )}
                       </td>
                     </tr>
                     {isExpanded && (
@@ -276,6 +340,93 @@ export default function UsersPage() {
           password={tempPassword.password}
           onClose={() => setTempPassword(null)}
         />
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={closeDelete}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-900 mb-1">Delete user?</h3>
+            <p className="text-sm text-gray-500 mb-4">{deleteTarget.name} · {deleteTarget.email}</p>
+
+            {deleteError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-3">{deleteError}</p>
+            )}
+
+            {deleteCounts && Object.values(deleteCounts).some((v) => v > 0) && (
+              <div className="mb-4">
+                <p className="text-sm text-gray-700 mb-2">This user has associated records:</p>
+                <ul className="text-sm bg-gray-50 border border-gray-200 rounded-lg px-4 py-3 space-y-1 mb-3">
+                  {Object.entries(deleteCounts).filter(([, v]) => v > 0).map(([k, v]) => (
+                    <li key={k} className="flex justify-between">
+                      <span className="capitalize">{k.replace(/([A-Z])/g, " $1")}</span>
+                      <span className="font-medium">{v}</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="space-y-2">
+                  <label className="flex items-start gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      className="mt-0.5"
+                      checked={deleteAction === "reassign"}
+                      onChange={() => setDeleteAction("reassign")}
+                    />
+                    <span><strong>Reassign</strong> records to another user</span>
+                  </label>
+                  {deleteAction === "reassign" && (
+                    <select
+                      className="input ml-5 text-sm"
+                      value={deleteReassignTo}
+                      onChange={(e) => setDeleteReassignTo(e.target.value)}
+                    >
+                      <option value="">Select user…</option>
+                      {users.filter((u) => u.id !== deleteTarget.id).map((u) => (
+                        <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                      ))}
+                    </select>
+                  )}
+                  <label className="flex items-start gap-2 text-sm cursor-pointer">
+                    <input
+                      type="radio"
+                      className="mt-0.5"
+                      checked={deleteAction === "delete_records"}
+                      onChange={() => setDeleteAction("delete_records")}
+                    />
+                    <span><strong>Delete all</strong> associated records permanently</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <div className="mb-4">
+              <label className="label">Type the user&apos;s email to confirm</label>
+              <input
+                type="text"
+                className="input"
+                placeholder={deleteTarget.email}
+                value={deleteConfirmEmail}
+                onChange={(e) => setDeleteConfirmEmail(e.target.value)}
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-3 justify-end">
+              <button onClick={closeDelete} className="btn-secondary">Cancel</button>
+              <button
+                onClick={confirmDelete}
+                disabled={
+                  deleteInProgress ||
+                  deleteConfirmEmail !== deleteTarget.email ||
+                  (!!deleteCounts && Object.values(deleteCounts).some((v) => v > 0) && !deleteAction) ||
+                  (deleteAction === "reassign" && !deleteReassignTo)
+                }
+                className="btn-danger"
+              >
+                {deleteInProgress ? "Deleting…" : "Delete user"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

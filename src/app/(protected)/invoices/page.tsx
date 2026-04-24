@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react"
 import Link from "next/link"
+import { useSession } from "next-auth/react"
 
 interface BillingClient {
   id: string
@@ -40,16 +41,6 @@ interface Timesheet {
   entries: TimesheetEntry[]
 }
 
-interface Invoice {
-  id: string
-  amount: string
-  currency: string
-  status: string
-  createdAt: string
-  timesheetIds: string[]
-  client: BillingClient
-}
-
 const statusClass: Record<string, string> = {
   DRAFT: "badge-draft",
   SENT:  "badge-sent",
@@ -67,13 +58,34 @@ function formatAddress(c: BillingClient): string[] {
   ].filter(Boolean) as string[]
 }
 
+// Invoice type needs xeroInvoiceId for delete warnings
+interface Invoice {
+  id: string
+  amount: string
+  currency: string
+  status: string
+  createdAt: string
+  timesheetIds: string[]
+  xeroInvoiceId?: string | null
+  client: BillingClient
+}
+
 export default function InvoicesPage() {
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === "ADMIN"
+
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [clients, setClients] = useState<BillingClient[]>([])
   const [approvedTimesheets, setApprovedTimesheets] = useState<Timesheet[]>([])
   const [loading, setLoading] = useState(true)
   const [showCreate, setShowCreate] = useState(false)
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null)
+
+  // Delete state
+  const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null)
+  const [deleteConfirmNumber, setDeleteConfirmNumber] = useState("")
+  const [deleteInProgress, setDeleteInProgress] = useState(false)
+  const [deleteError, setDeleteError] = useState("")
 
   async function load() {
     const [inv, cl, ts] = await Promise.all([
@@ -90,6 +102,28 @@ export default function InvoicesPage() {
   useEffect(() => { load() }, [])
 
   const total = invoices.reduce((sum, inv) => sum + parseFloat(inv.amount), 0)
+
+  const needsConfirmNumber = (inv: Invoice) => inv.status !== "DRAFT"
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleteInProgress(true)
+    const body = needsConfirmNumber(deleteTarget) ? { confirmNumber: deleteConfirmNumber } : undefined
+    const res = await fetch(`/api/invoices/${deleteTarget.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    })
+    setDeleteInProgress(false)
+    if (res.status === 204) {
+      setDeleteTarget(null)
+      setDeleteConfirmNumber("")
+      load()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setDeleteError(data.error ?? "Failed to delete invoice.")
+    }
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -185,6 +219,14 @@ export default function InvoicesPage() {
                     >
                       Preview
                     </Link>
+                    {isAdmin && (
+                      <button
+                        onClick={() => { setDeleteTarget(inv); setDeleteConfirmNumber(""); setDeleteError("") }}
+                        className="text-sm text-red-500 hover:underline"
+                      >
+                        Delete
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -207,6 +249,60 @@ export default function InvoicesPage() {
           invoice={previewInvoice}
           onClose={() => setPreviewInvoice(null)}
         />
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => { setDeleteTarget(null); setDeleteConfirmNumber(""); setDeleteError("") }}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Delete invoice?</h3>
+            {(deleteTarget.status === "SENT" || deleteTarget.status === "PAID") && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-sm text-amber-800">
+                This invoice has been <strong>{deleteTarget.status.toLowerCase()}</strong>. Deleting it will NOT notify the client or update their records. Linked time entries and expenses will remain marked as invoiced.
+              </div>
+            )}
+            {deleteTarget.xeroInvoiceId && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-sm text-red-800">
+                This invoice has been synced to Xero. Deleting it here will NOT remove it from Xero — you must also delete it there manually.
+              </div>
+            )}
+            {deleteError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-3">{deleteError}</p>
+            )}
+            <p className="text-sm text-gray-600 mb-3">
+              {deleteTarget.client.companyName ?? deleteTarget.client.name} · {deleteTarget.currency} {parseFloat(deleteTarget.amount).toFixed(2)}
+            </p>
+            {needsConfirmNumber(deleteTarget) ? (
+              <>
+                <p className="text-sm font-medium text-gray-700 mb-1">Type the invoice ID to confirm:</p>
+                <input
+                  type="text"
+                  className="input mb-4 font-mono text-xs"
+                  placeholder={deleteTarget.id}
+                  value={deleteConfirmNumber}
+                  onChange={(e) => setDeleteConfirmNumber(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-3 justify-end">
+                  <button onClick={() => { setDeleteTarget(null); setDeleteConfirmNumber("") }} className="btn-secondary">Cancel</button>
+                  <button
+                    onClick={confirmDelete}
+                    disabled={deleteInProgress || deleteConfirmNumber !== deleteTarget.id}
+                    className="btn-danger"
+                  >
+                    {deleteInProgress ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setDeleteTarget(null)} className="btn-secondary">Cancel</button>
+                <button onClick={confirmDelete} disabled={deleteInProgress} className="btn-danger">
+                  {deleteInProgress ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

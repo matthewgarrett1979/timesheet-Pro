@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSession } from "next-auth/react"
 
 const CATEGORIES = [
   "Travel", "Accommodation", "Subsistence", "Equipment",
@@ -30,12 +31,20 @@ interface Expense {
 }
 
 export default function ExpensesPage() {
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === "ADMIN"
+
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState("")
   const [showModal, setShowModal] = useState(false)
   const [editExpense, setEditExpense] = useState<Expense | null>(null)
+
+  // Delete state
+  const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null)
+  const [deleteInProgress, setDeleteInProgress] = useState(false)
+  const [deleteError, setDeleteError] = useState("")
 
   async function load() {
     const qs = statusFilter ? `?status=${statusFilter}` : ""
@@ -46,6 +55,20 @@ export default function ExpensesPage() {
     setExpenses(ex)
     setClients(cl)
     setLoading(false)
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleteInProgress(true)
+    const res = await fetch(`/api/expenses/${deleteTarget.id}`, { method: "DELETE" })
+    setDeleteInProgress(false)
+    if (res.status === 204) {
+      setDeleteTarget(null)
+      load()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setDeleteError(data.error ?? "Failed to delete expense.")
+    }
   }
 
   useEffect(() => { setLoading(true); load() }, [statusFilter])
@@ -117,14 +140,24 @@ export default function ExpensesPage() {
                     </span>
                   </td>
                   <td>
-                    {e.status === "DRAFT" && (
-                      <button
-                        onClick={() => { setEditExpense(e); setShowModal(true) }}
-                        className="text-sm text-blue-600 hover:underline"
-                      >
-                        Edit
-                      </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {e.status === "DRAFT" && (
+                        <button
+                          onClick={() => { setEditExpense(e); setShowModal(true) }}
+                          className="text-sm text-blue-600 hover:underline"
+                        >
+                          Edit
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
+                          onClick={() => { setDeleteTarget(e); setDeleteError("") }}
+                          className="text-sm text-red-500 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -140,6 +173,31 @@ export default function ExpensesPage() {
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); load() }}
         />
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => { setDeleteTarget(null); setDeleteError("") }}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Delete expense?</h3>
+            {deleteTarget.status === "APPROVED" && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-sm text-amber-800">
+                This expense is <strong>APPROVED</strong>. Deleting it may affect any associated invoice calculations.
+              </div>
+            )}
+            {deleteError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mb-3">{deleteError}</p>
+            )}
+            <p className="text-sm text-gray-600 mb-4">
+              <span className="font-medium">{deleteTarget.description}</span> — {deleteTarget.currency} {parseFloat(deleteTarget.amount).toFixed(2)}
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => { setDeleteTarget(null); setDeleteError("") }} className="btn-secondary">Cancel</button>
+              <button onClick={confirmDelete} disabled={deleteInProgress} className="btn-danger">
+                {deleteInProgress ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

@@ -146,7 +146,8 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
 
-  if (entry.status !== TimeEntryStatus.DRAFT) {
+  const isAdmin = (session.user.role as Role) === Role.ADMIN
+  if (entry.status !== TimeEntryStatus.DRAFT && !isAdmin) {
     return NextResponse.json(
       { error: "Only DRAFT entries can be deleted" },
       { status: 409 }

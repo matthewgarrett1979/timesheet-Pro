@@ -101,6 +101,11 @@ export default function TimesheetsPage() {
   const [partialSel,    setPartialSel]   = useState<Set<string>>(new Set())
   const [partialReject, setPartialReject] = useState<Set<string>>(new Set())
 
+  // Admin delete
+  const [deleteTarget, setDeleteTarget] = useState<Timesheet | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState("")
+  const [deleteInProgress, setDeleteInProgress] = useState(false)
+
   const load = async () => {
     setLoading(true)
     const params = new URLSearchParams()
@@ -201,6 +206,27 @@ export default function TimesheetsPage() {
     setTimeout(() => setActionMsg(""), 3000)
   }
 
+  async function doDeleteTimesheet() {
+    if (!deleteTarget) return
+    setDeleteInProgress(true)
+    const needsConfirm = deleteTarget.status === "INVOICED"
+    const res = await fetch(`/api/timesheets/${deleteTarget.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: needsConfirm ? JSON.stringify({ confirmId: deleteConfirmId }) : undefined,
+    })
+    setDeleteInProgress(false)
+    if (res.status === 204) {
+      setDeleteTarget(null)
+      setDeleteConfirmId("")
+      await load()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setActionMsg(data.error ?? "Failed to delete timesheet.")
+      setTimeout(() => setActionMsg(""), 4000)
+    }
+  }
+
   async function doResendEmail(id: string) {
     setSubmitting(id)
     await fetch(`/api/timesheets/${id}/resend-approval`, { method: "POST" })
@@ -282,6 +308,9 @@ export default function TimesheetsPage() {
                         {ts.status === "DRAFT" && (
                           <button onClick={() => submitTimesheet(ts.id)} disabled={submitting === ts.id} className="btn-primary btn text-xs py-0.5">{submitting === ts.id ? "…" : "Submit"}</button>
                         )}
+                        {isAdmin && (
+                          <button onClick={() => { setDeleteTarget(ts); setDeleteConfirmId("") }} className="btn text-xs py-0.5 text-red-500 hover:underline">Delete</button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -291,6 +320,54 @@ export default function TimesheetsPage() {
           </table>
         )}
       </div>
+
+      {/* Admin delete modal */}
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={() => { setDeleteTarget(null); setDeleteConfirmId("") }}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">Delete timesheet?</h3>
+            {(deleteTarget.status === "SUBMITTED" || deleteTarget.status === "APPROVED") && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 text-sm text-amber-800">
+                This timesheet is <strong>{deleteTarget.status}</strong>. Its time entries will be unlinked and reset to DRAFT so they can be re-submitted.
+              </div>
+            )}
+            {deleteTarget.status === "INVOICED" && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-sm text-red-800">
+                This timesheet is <strong>INVOICED</strong>. Deleting it will not cancel any associated invoice. Time entries will be unlinked and reset to DRAFT.
+              </div>
+            )}
+            <p className="text-sm text-gray-600 mb-3">
+              {fmt(deleteTarget.periodStart)} – {fmt(deleteTarget.periodEnd)} · {deleteTarget.client.name}
+            </p>
+            {deleteTarget.status === "INVOICED" ? (
+              <>
+                <p className="text-sm font-medium text-gray-700 mb-1">Type the timesheet ID to confirm:</p>
+                <input
+                  type="text"
+                  className="input mb-4 font-mono text-xs"
+                  placeholder={deleteTarget.id}
+                  value={deleteConfirmId}
+                  onChange={e => setDeleteConfirmId(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-3 justify-end">
+                  <button onClick={() => { setDeleteTarget(null); setDeleteConfirmId("") }} className="btn-secondary">Cancel</button>
+                  <button onClick={doDeleteTimesheet} disabled={deleteInProgress || deleteConfirmId !== deleteTarget.id} className="btn-danger">
+                    {deleteInProgress ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex gap-3 justify-end">
+                <button onClick={() => setDeleteTarget(null)} className="btn-secondary">Cancel</button>
+                <button onClick={doDeleteTimesheet} disabled={deleteInProgress} className="btn-danger">
+                  {deleteInProgress ? "Deleting…" : "Delete"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Detail modal */}
       {detail && (

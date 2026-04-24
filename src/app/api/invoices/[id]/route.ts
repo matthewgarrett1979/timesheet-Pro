@@ -1,13 +1,15 @@
 /**
- * GET  /api/invoices/[id]  — fetch a single invoice
- * PATCH /api/invoices/[id] — update status (ADMIN/MANAGER)
+ * GET    /api/invoices/[id]  — fetch a single invoice
+ * PATCH  /api/invoices/[id]  — update status (ADMIN/MANAGER)
+ * DELETE /api/invoices/[id]  — ADMIN only hard delete
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
 import { authOptions } from "@/lib/auth"
 import { db } from "@/lib/db"
+import { audit, getClientIp } from "@/lib/audit"
 import { checkRateLimit } from "@/lib/rate-limit"
-import { Role, InvoiceStatus } from "@prisma/client"
+import { AuditAction, Role, InvoiceStatus } from "@prisma/client"
 import { z } from "zod"
 
 const INVOICE_INCLUDE = {
@@ -88,4 +90,57 @@ export async function PATCH(
 
   const { xeroAccessTokenEnc: _a, xeroRefreshTokenEnc: _r, ...safe } = updated
   return NextResponse.json(safe)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+  if ((session.user.role as Role) !== Role.ADMIN) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  const invoice = await db.invoice.findUnique({
+    where: { id },
+    select: { id: true, status: true, xeroInvoiceId: true, clientId: true, managerId: true, amount: true, currency: true },
+  })
+  if (!invoice) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  let body: { confirmNumber?: string } = {}
+  try { body = await req.json() } catch { /* no body */ }
+
+  // For non-DRAFT invoices require the invoice number (id) typed as confirmation
+  if (invoice.status !== InvoiceStatus.DRAFT && body.confirmNumber !== id) {
+    return NextResponse.json(
+      { error: "Type the invoice ID to confirm deletion", xeroWarning: !!invoice.xeroInvoiceId },
+      { status: 400 }
+    )
+  }
+
+  await db.invoice.delete({ where: { id } })
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.INVOICE_DELETED,
+    resource: "invoice",
+    resourceId: id,
+    metadata: {
+      status: invoice.status,
+      clientId: invoice.clientId,
+      xeroInvoiceId: invoice.xeroInvoiceId,
+      amount: invoice.amount?.toString(),
+      currency: invoice.currency,
+    },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }

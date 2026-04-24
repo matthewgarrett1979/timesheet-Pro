@@ -1,6 +1,7 @@
 /**
- * GET   /api/expenses/[id]  — fetch an expense (ownership enforced)
- * PATCH /api/expenses/[id]  — update an expense (DRAFT only)
+ * GET    /api/expenses/[id]  — fetch an expense (ownership enforced)
+ * PATCH  /api/expenses/[id]  — update an expense (DRAFT only)
+ * DELETE /api/expenses/[id]  — ADMIN only hard delete
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -101,4 +102,54 @@ export async function PATCH(
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+  if ((session.user.role as Role) !== Role.ADMIN) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  const expense = await db.expense.findUnique({
+    where: { id },
+    select: { id: true, status: true, receiptPath: true, description: true, managerId: true, clientId: true },
+  })
+  if (!expense) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  // Delete Vercel Blob receipt if present (non-fatal)
+  if (expense.receiptPath) {
+    try {
+      const { del: blobDel } = await import("@vercel/blob")
+      await blobDel(expense.receiptPath)
+    } catch { /* non-fatal */ }
+  }
+
+  await db.expense.delete({ where: { id } })
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.EXPENSE_DELETED,
+    resource: "expense",
+    resourceId: id,
+    metadata: {
+      status: expense.status,
+      description: expense.description,
+      managerId: expense.managerId,
+      clientId: expense.clientId,
+      hadReceipt: !!expense.receiptPath,
+    },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }

@@ -1,6 +1,7 @@
 /**
- * GET   /api/timesheets/[id]  — fetch a single timesheet
- * PATCH /api/timesheets/[id]  — approve or reject a timesheet (ADMIN only)
+ * GET    /api/timesheets/[id]  — fetch a single timesheet
+ * PATCH  /api/timesheets/[id]  — approve or reject a timesheet (ADMIN only)
+ * DELETE /api/timesheets/[id]  — ADMIN hard delete; unlinks time entries back to DRAFT
  *
  * Managers submit via POST /api/timesheets/[id]/submit.
  * Time entry management is via /api/time-entries.
@@ -116,4 +117,53 @@ export async function PATCH(
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+  if ((session.user.role as Role) !== Role.ADMIN) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  const timesheet = await db.timesheet.findUnique({
+    where: { id },
+    select: { id: true, status: true, managerId: true, clientId: true, periodStart: true, periodEnd: true },
+  })
+  if (!timesheet) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  // For INVOICED timesheets require the timesheet ID typed as confirmation
+  let body: { confirmId?: string } = {}
+  try { body = await req.json() } catch { /* no body */ }
+
+  if (timesheet.status === TimesheetStatus.INVOICED && body.confirmId !== id) {
+    return NextResponse.json({ error: "Type the timesheet ID to confirm deletion of an INVOICED timesheet" }, { status: 400 })
+  }
+
+  await db.$transaction([
+    // Unlink time entries — reset back to DRAFT so they can be re-submitted
+    db.timeEntry.updateMany({ where: { timesheetId: id }, data: { timesheetId: null, status: "DRAFT" } }),
+    db.approvalToken.deleteMany({ where: { timesheetId: id } }),
+    db.timesheet.delete({ where: { id } }),
+  ])
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.TIMESHEET_DELETED,
+    resource: "timesheet",
+    resourceId: id,
+    metadata: { status: timesheet.status, managerId: timesheet.managerId, clientId: timesheet.clientId },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 
 interface Client {
   id: string
@@ -43,10 +44,51 @@ function getHealth(p: Project): { label: string; cls: string } {
 
 export default function ProjectsPage() {
   const router = useRouter()
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === "ADMIN"
+
   const [projects, setProjects] = useState<Project[]>([])
   const [clients,  setClients]  = useState<Client[]>([])
   const [loading,  setLoading]  = useState(true)
   const [showModal, setShowModal] = useState(false)
+
+  // Delete state
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null)
+  const [deleteCounts, setDeleteCounts] = useState<Record<string, number> | null>(null)
+  const [cascadeConfirm, setCascadeConfirm] = useState("")
+  const [deleteInProgress, setDeleteInProgress] = useState(false)
+
+  function openDelete(e: React.MouseEvent, p: Project) {
+    e.stopPropagation()
+    setDeleteTarget(p)
+    setDeleteCounts(null)
+    setCascadeConfirm("")
+  }
+
+  function closeDelete() {
+    setDeleteTarget(null)
+    setDeleteCounts(null)
+    setCascadeConfirm("")
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return
+    setDeleteInProgress(true)
+    const res = await fetch(`/api/projects/${deleteTarget.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: deleteCounts ? JSON.stringify({ cascade: true }) : undefined,
+    })
+    setDeleteInProgress(false)
+
+    if (res.status === 204) {
+      closeDelete()
+      load()
+    } else if (res.status === 409) {
+      const data = await res.json().catch(() => ({}))
+      setDeleteCounts(data.counts ?? {})
+    }
+  }
 
   async function load() {
     const [pr, cl] = await Promise.all([
@@ -90,6 +132,7 @@ export default function ProjectsPage() {
                 <th>Billing</th>
                 <th>Health</th>
                 <th>Status</th>
+                {isAdmin && <th></th>}
               </tr>
             </thead>
             <tbody>
@@ -114,6 +157,16 @@ export default function ProjectsPage() {
                         {p.active ? "Active" : "Inactive"}
                       </span>
                     </td>
+                    {isAdmin && (
+                      <td>
+                        <button
+                          onClick={(e) => openDelete(e, p)}
+                          className="text-xs text-red-500 hover:underline"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 )
               })}
@@ -128,6 +181,61 @@ export default function ProjectsPage() {
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); load() }}
         />
+      )}
+
+      {deleteTarget && (
+        <div className="modal-backdrop" onClick={closeDelete}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            {deleteCounts ? (
+              <>
+                <h3 className="text-base font-semibold text-red-700 mb-2">Cascade delete — this cannot be undone</h3>
+                <p className="text-sm text-gray-700 mb-3">
+                  <span className="font-medium">{deleteTarget.name}</span> has associated records that will also be permanently deleted:
+                </p>
+                <ul className="text-sm text-gray-600 mb-3 space-y-1 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                  {Object.entries(deleteCounts).filter(([, v]) => v > 0).map(([k, v]) => (
+                    <li key={k} className="flex justify-between">
+                      <span className="capitalize">{k.replace(/([A-Z])/g, " $1")}</span>
+                      <span className="font-medium">{v}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-sm font-medium text-gray-700 mb-1">Type the project name to confirm:</p>
+                <input
+                  type="text"
+                  className="input mb-4"
+                  placeholder={deleteTarget.name}
+                  value={cascadeConfirm}
+                  onChange={(e) => setCascadeConfirm(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-3 justify-end">
+                  <button onClick={closeDelete} className="btn-secondary">Cancel</button>
+                  <button
+                    onClick={confirmDelete}
+                    disabled={deleteInProgress || cascadeConfirm !== deleteTarget.name}
+                    className="btn-danger"
+                  >
+                    {deleteInProgress ? "Deleting…" : "Delete everything"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">Delete project?</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Permanently delete <span className="font-medium">{deleteTarget.name}</span>? This cannot be undone.
+                </p>
+                <div className="flex gap-3 justify-end">
+                  <button onClick={closeDelete} className="btn-secondary">Cancel</button>
+                  <button onClick={confirmDelete} disabled={deleteInProgress} className="btn-danger">
+                    {deleteInProgress ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
     </div>
   )

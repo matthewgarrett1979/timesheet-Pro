@@ -150,51 +150,85 @@ export async function DELETE(
     return NextResponse.json({ error: auth.error }, { status: auth.status })
   }
 
-  const existing = await getClientForUser(
-    id,
-    auth.session.user.id,
-    auth.session.user.role as Role
-  )
+  // Hard delete is ADMIN-only
+  if ((auth.session.user.role as Role) !== Role.ADMIN) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
 
+  const existing = await db.client.findUnique({ where: { id } })
   if (!existing) {
-    await audit({
-      userId: auth.session.user.id,
-      action: AuditAction.UNAUTHORISED_ACCESS,
-      resource: "client",
-      resourceId: id,
-      metadata: { action: "delete" },
-      ipAddress: getClientIp(req),
-      success: false,
-    })
     return NextResponse.json({ error: "Not found" }, { status: 404 })
   }
 
-  // Block deletion if any associated records exist
-  const [timesheets, invoices, expenses, projects] = await Promise.all([
+  // Count associated records
+  const projectRows = await db.project.findMany({ where: { clientId: id }, select: { id: true } })
+  const projectIds = projectRows.map((p) => p.id)
+
+  const [timesheetCount, invoiceCount, expenseCount, timeEntryCount] = await Promise.all([
     db.timesheet.count({ where: { clientId: id } }),
     db.invoice.count({ where: { clientId: id } }),
     db.expense.count({ where: { clientId: id } }),
-    db.project.count({ where: { clientId: id } }),
+    db.timeEntry.count({ where: { clientId: id } }),
   ])
 
-  if (timesheets + invoices + expenses + projects > 0) {
-    return NextResponse.json(
-      {
-        error: `Cannot delete — this client has associated timesheets, projects or invoices. Archive the client instead.`,
-        counts: { timesheets, invoices, expenses, projects },
-      },
-      { status: 409 }
-    )
+  const counts = {
+    projects: projectIds.length,
+    timesheets: timesheetCount,
+    invoices: invoiceCount,
+    expenses: expenseCount,
+    timeEntries: timeEntryCount,
   }
 
-  await db.client.delete({ where: { id } })
+  let body: { cascade?: boolean } = {}
+  try { body = await req.json() } catch { /* no body */ }
+
+  const hasAssociations = Object.values(counts).some((n) => n > 0)
+
+  if (hasAssociations && !body.cascade) {
+    return NextResponse.json({ error: "Client has associated records.", counts }, { status: 409 })
+  }
+
+  if (body.cascade) {
+    // Delete Vercel Blob receipts for expenses first (non-fatal)
+    const { del: blobDel } = await import("@vercel/blob")
+    const expensesWithReceipts = await db.expense.findMany({
+      where: { clientId: id, receiptPath: { not: null } },
+      select: { receiptPath: true },
+    })
+    await Promise.allSettled(
+      expensesWithReceipts.map((e) => blobDel(e.receiptPath!))
+    )
+
+    const timesheetRows = await db.timesheet.findMany({ where: { clientId: id }, select: { id: true } })
+    const timesheetIds = timesheetRows.map((t) => t.id)
+
+    await db.$transaction([
+      // Null out FK references on time entries
+      db.timeEntry.updateMany({
+        where: { OR: [{ clientId: id }, { projectId: { in: projectIds } }] },
+        data: { timesheetId: null, projectId: null, phaseId: null, purchaseOrderId: null, clientId: null },
+      }),
+      // Remove approval tokens
+      db.approvalToken.deleteMany({ where: { timesheetId: { in: timesheetIds } } }),
+      // Delete dependent records ordered to respect FKs
+      db.timesheet.deleteMany({ where: { clientId: id } }),
+      db.invoice.deleteMany({ where: { clientId: id } }),
+      db.expense.deleteMany({ where: { clientId: id } }),
+      db.projectPhase.deleteMany({ where: { projectId: { in: projectIds } } }),
+      // Projects cascade → UserProject, PurchaseOrder, ResourceAllocation
+      db.project.deleteMany({ where: { clientId: id } }),
+      db.client.delete({ where: { id } }),
+    ])
+  } else {
+    await db.client.delete({ where: { id } })
+  }
 
   await audit({
     userId: auth.session.user.id,
     action: AuditAction.CLIENT_DELETED,
     resource: "client",
     resourceId: id,
-    metadata: { name: existing.name, reference: existing.reference },
+    metadata: { name: existing.name, reference: existing.reference, cascade: body.cascade ?? false, counts },
     ipAddress: getClientIp(req),
     userAgent: req.headers.get("user-agent") ?? undefined,
     success: true,

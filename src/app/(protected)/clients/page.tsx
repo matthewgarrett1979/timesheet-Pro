@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useSession } from "next-auth/react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -117,6 +118,9 @@ function clientToForm(c: Client): FormState {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ClientsPage() {
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === "ADMIN"
+
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -125,6 +129,8 @@ export default function ClientsPage() {
 
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<Client | null>(null)
+  const [deleteCounts, setDeleteCounts] = useState<Record<string, number> | null>(null)
+  const [cascadeConfirm, setCascadeConfirm] = useState("")
   const [deleteError, setDeleteError] = useState("")
   const [deleteInProgress, setDeleteInProgress] = useState(false)
 
@@ -148,18 +154,36 @@ export default function ClientsPage() {
 
   function openDelete(c: Client) {
     setDeleteTarget(c)
+    setDeleteCounts(null)
+    setCascadeConfirm("")
+    setDeleteError("")
+  }
+
+  function closeDelete() {
+    setDeleteTarget(null)
+    setDeleteCounts(null)
+    setCascadeConfirm("")
     setDeleteError("")
   }
 
   async function confirmDelete() {
     if (!deleteTarget) return
     setDeleteInProgress(true)
-    const res = await fetch(`/api/clients/${deleteTarget.id}`, { method: "DELETE" })
+
+    // First attempt: simple delete
+    const res = await fetch(`/api/clients/${deleteTarget.id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: deleteCounts ? JSON.stringify({ cascade: true }) : undefined,
+    })
     setDeleteInProgress(false)
 
     if (res.status === 204) {
-      setDeleteTarget(null)
+      closeDelete()
       load()
+    } else if (res.status === 409) {
+      const data = await res.json().catch(() => ({}))
+      setDeleteCounts(data.counts ?? {})
     } else {
       const data = await res.json().catch(() => ({}))
       setDeleteError(data.error ?? "Failed to delete client.")
@@ -290,12 +314,14 @@ export default function ClientsPage() {
                           >
                             Archive
                           </button>
-                          <button
-                            onClick={() => openDelete(c)}
-                            className="text-red-500 hover:underline"
-                          >
-                            Delete
-                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => openDelete(c)}
+                              className="text-red-500 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -318,9 +344,9 @@ export default function ClientsPage() {
 
       {/* Delete confirmation modal */}
       {deleteTarget && (
-        <div className="modal-backdrop" onClick={() => { setDeleteTarget(null); setDeleteError("") }}>
+        <div className="modal-backdrop" onClick={closeDelete}>
           <div
-            className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6"
+            className="bg-white rounded-xl shadow-xl w-full max-w-md p-6"
             onClick={(e) => e.stopPropagation()}
           >
             {deleteError ? (
@@ -328,21 +354,51 @@ export default function ClientsPage() {
                 <h3 className="text-base font-semibold text-gray-900 mb-2">Cannot delete client</h3>
                 <p className="text-sm text-gray-600 mb-4">{deleteError}</p>
                 <div className="flex gap-3 justify-end">
+                  <button onClick={closeDelete} className="btn-secondary">Close</button>
                   <button
-                    onClick={() => { setDeleteTarget(null); setDeleteError("") }}
-                    className="btn-secondary"
-                  >
-                    Close
-                  </button>
-                  <button
-                    onClick={() => {
-                      toggleArchive(deleteTarget, true)
-                      setDeleteTarget(null)
-                      setDeleteError("")
-                    }}
+                    onClick={() => { toggleArchive(deleteTarget, true); closeDelete() }}
                     className="btn-primary"
                   >
                     Archive instead
+                  </button>
+                </div>
+              </>
+            ) : deleteCounts ? (
+              <>
+                <h3 className="text-base font-semibold text-red-700 mb-2">Cascade delete — this cannot be undone</h3>
+                <p className="text-sm text-gray-700 mb-3">
+                  <span className="font-medium">{deleteTarget.companyName ?? deleteTarget.name}</span> has associated records that will also be permanently deleted:
+                </p>
+                <ul className="text-sm text-gray-600 mb-3 space-y-1 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                  {Object.entries(deleteCounts).filter(([, v]) => v > 0).map(([k, v]) => (
+                    <li key={k} className="flex justify-between">
+                      <span className="capitalize">{k.replace(/([A-Z])/g, " $1")}</span>
+                      <span className="font-medium">{v}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-sm text-gray-600 mb-3">
+                  Time entries will be unlinked from their timesheets and reset to DRAFT.
+                </p>
+                <p className="text-sm font-medium text-gray-700 mb-1">
+                  Type the client name to confirm:
+                </p>
+                <input
+                  type="text"
+                  className="input mb-4"
+                  placeholder={deleteTarget.companyName ?? deleteTarget.name}
+                  value={cascadeConfirm}
+                  onChange={(e) => setCascadeConfirm(e.target.value)}
+                  autoFocus
+                />
+                <div className="flex gap-3 justify-end">
+                  <button onClick={closeDelete} className="btn-secondary">Cancel</button>
+                  <button
+                    onClick={confirmDelete}
+                    disabled={deleteInProgress || cascadeConfirm !== (deleteTarget.companyName ?? deleteTarget.name)}
+                    className="btn-danger"
+                  >
+                    {deleteInProgress ? "Deleting…" : "Delete everything"}
                   </button>
                 </div>
               </>
@@ -350,19 +406,12 @@ export default function ClientsPage() {
               <>
                 <h3 className="text-base font-semibold text-gray-900 mb-2">Delete client?</h3>
                 <p className="text-sm text-gray-600 mb-4">
-                  Are you sure you want to delete{" "}
-                  <span className="font-medium">
-                    {deleteTarget.companyName ?? deleteTarget.name}
-                  </span>
-                  ? This cannot be undone.
+                  Permanently delete{" "}
+                  <span className="font-medium">{deleteTarget.companyName ?? deleteTarget.name}</span>?
+                  This cannot be undone.
                 </p>
                 <div className="flex gap-3 justify-end">
-                  <button
-                    onClick={() => setDeleteTarget(null)}
-                    className="btn-secondary"
-                  >
-                    Cancel
-                  </button>
+                  <button onClick={closeDelete} className="btn-secondary">Cancel</button>
                   <button
                     onClick={confirmDelete}
                     disabled={deleteInProgress}

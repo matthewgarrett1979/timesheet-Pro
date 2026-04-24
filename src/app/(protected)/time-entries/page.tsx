@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useSession } from "next-auth/react"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -91,6 +92,9 @@ function statusClass(s: string) {
 // Main page
 // ---------------------------------------------------------------------------
 function TimeEntriesContent() {
+  const { data: session } = useSession()
+  const isAdmin = session?.user?.role === "ADMIN"
+
   // Data
   const [clients, setClients]     = useState<Client[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -684,10 +688,10 @@ function TimeEntriesContent() {
                         <span className="text-sm font-medium text-gray-700">{Number(entry.hours).toFixed(2)}h</span>
                         <span className={`badge ${statusClass(entry.status)}`}>{entry.status}</span>
                         {entry.status === "DRAFT" && !entry.timesheetId && (
-                          <>
-                            <button onClick={() => openEdit(entry)} className="text-xs text-blue-600 hover:underline">Edit</button>
-                            <button onClick={() => deleteEntry(entry.id)} className="text-xs text-red-500 hover:underline">Delete</button>
-                          </>
+                          <button onClick={() => openEdit(entry)} className="text-xs text-blue-600 hover:underline">Edit</button>
+                        )}
+                        {(entry.status === "DRAFT" && !entry.timesheetId || isAdmin) && (
+                          <button onClick={() => deleteEntry(entry.id)} className="text-xs text-red-500 hover:underline">Delete</button>
                         )}
                       </div>
                     </div>

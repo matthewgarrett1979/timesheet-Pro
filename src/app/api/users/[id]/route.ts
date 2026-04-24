@@ -1,6 +1,7 @@
 /**
- * GET   /api/users/[id]  — self or ADMIN: fetch user
- * PATCH /api/users/[id]  — self: update name/password; ADMIN: also update role/unlock
+ * GET    /api/users/[id]  — self or ADMIN: fetch user
+ * PATCH  /api/users/[id]  — self: update name/password; ADMIN: also update role/unlock
+ * DELETE /api/users/[id]  — ADMIN only; body: { action, reassignToUserId?, confirmEmail }
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getServerSession } from "next-auth"
@@ -137,4 +138,98 @@ export async function PATCH(
   })
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+
+  const rl = await checkRateLimit(req, "api")
+  if (rl.denied) return NextResponse.json({ error: "Too many requests" }, { status: rl.status })
+
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: "Unauthenticated" }, { status: 401 })
+  if (!session.user.mfaVerified) return NextResponse.json({ error: "MFA verification required" }, { status: 403 })
+  if ((session.user.role as Role) !== Role.ADMIN) return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+
+  if (id === session.user.id) {
+    return NextResponse.json({ error: "You cannot delete your own account" }, { status: 409 })
+  }
+
+  const target = await db.user.findUnique({
+    where: { id },
+    select: { id: true, email: true, name: true, role: true },
+  })
+  if (!target) return NextResponse.json({ error: "Not found" }, { status: 404 })
+
+  if (target.role === Role.ADMIN) {
+    const adminCount = await db.user.count({ where: { role: Role.ADMIN } })
+    if (adminCount <= 1) {
+      return NextResponse.json({ error: "Cannot delete the last admin account" }, { status: 409 })
+    }
+  }
+
+  const [timeEntryCount, timesheetCount, expenseCount] = await Promise.all([
+    db.timeEntry.count({ where: { managerId: id } }),
+    db.timesheet.count({ where: { managerId: id } }),
+    db.expense.count({ where: { managerId: id } }),
+  ])
+  const counts = { timeEntries: timeEntryCount, timesheets: timesheetCount, expenses: expenseCount }
+  const hasRecords = Object.values(counts).some((n) => n > 0)
+
+  let body: { action?: "reassign" | "delete_records"; reassignToUserId?: string; confirmEmail?: string } = {}
+  try { body = await req.json() } catch { /* no body */ }
+
+  if (body.confirmEmail !== target.email) {
+    return NextResponse.json({ error: "Email confirmation does not match" }, { status: 400 })
+  }
+
+  if (hasRecords && !body.action) {
+    return NextResponse.json({ error: "User has associated records. Provide action=reassign or delete_records.", counts }, { status: 409 })
+  }
+
+  if (body.action === "reassign") {
+    if (!body.reassignToUserId) {
+      return NextResponse.json({ error: "reassignToUserId required for reassign action" }, { status: 400 })
+    }
+    const reassignTo = await db.user.findUnique({ where: { id: body.reassignToUserId } })
+    if (!reassignTo) {
+      return NextResponse.json({ error: "Target user not found" }, { status: 404 })
+    }
+    await db.$transaction([
+      db.timeEntry.updateMany({ where: { managerId: id }, data: { managerId: body.reassignToUserId } }),
+      db.timesheet.updateMany({ where: { managerId: id }, data: { managerId: body.reassignToUserId } }),
+      db.expense.updateMany({ where: { managerId: id }, data: { managerId: body.reassignToUserId } }),
+      db.project.updateMany({ where: { managerId: id }, data: { managerId: body.reassignToUserId } }),
+      db.client.updateMany({ where: { managerId: id }, data: { managerId: body.reassignToUserId } }),
+    ])
+  } else if (body.action === "delete_records") {
+    await db.$transaction([
+      db.resourceAllocation.deleteMany({ where: { userId: id } }),
+      db.resourceAllocation.deleteMany({ where: { createdById: id } }),
+      db.timeEntry.deleteMany({ where: { managerId: id } }),
+      db.timesheet.deleteMany({ where: { managerId: id } }),
+      db.expense.deleteMany({ where: { managerId: id } }),
+      db.project.updateMany({ where: { managerId: id }, data: { managerId: session.user.id } }),
+      db.client.updateMany({ where: { managerId: id }, data: { managerId: session.user.id } }),
+    ])
+  }
+
+  // Account, Session, UserProject cascade on delete
+  await db.user.delete({ where: { id } })
+
+  await audit({
+    userId: session.user.id,
+    action: AuditAction.USER_DELETED,
+    resource: "user",
+    resourceId: id,
+    metadata: { email: target.email, name: target.name, role: target.role, action: body.action ?? "none", counts },
+    ipAddress: getClientIp(req),
+    userAgent: req.headers.get("user-agent") ?? undefined,
+    success: true,
+  })
+
+  return new NextResponse(null, { status: 204 })
 }
