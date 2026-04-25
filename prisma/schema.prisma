@@ -17,6 +17,13 @@ enum Role {
   USER
 }
 
+enum PersonaCompanySize {
+  SIZE_0_10
+  SIZE_11_50
+  SIZE_51_250
+  SIZE_250_PLUS
+}
+
 enum TimesheetStatus {
   DRAFT
   SUBMITTED
@@ -149,6 +156,10 @@ model User {
   costRate      Decimal?  @db.Decimal(10, 2)
 
   mustChangePassword Boolean @default(false)
+
+  // Persona-based permissions (null = legacy role-based fallback)
+  personaId   String?
+  persona     Persona? @relation(fields: [personaId], references: [id])
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -550,6 +561,44 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Persona / Permission models
+// ---------------------------------------------------------------------------
+
+model Persona {
+  id             String             @id @default(cuid())
+  key            String             @unique
+  name           String
+  description    String?
+  isSystem       Boolean            @default(true)
+  minCompanySize PersonaCompanySize @default(SIZE_0_10)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  permissions PersonaPermission[]
+  users       User[]
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  namespace   String
+  description String
+  createdAt   DateTime @default(now())
+
+  personas PersonaPermission[]
+}
+
+model PersonaPermission {
+  personaId    String
+  permissionId String
+
+  persona    Persona    @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([personaId, permissionId])
 }
 
 // ---------------------------------------------------------------------------
