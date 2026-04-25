@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import { useSession } from "next-auth/react"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface WizardState {
-  // Step 1
-  domain:              string
-  verificationToken:   string
-  domainVerified:      boolean
-  // Step 2
+interface MigrateState {
+  // Step 1 — domain
+  domain:            string
+  verificationToken: string
+  domainVerified:    boolean
+  // Step 2 — org details
   companyName:         string
   companyLegalName:    string
   companyAddress:      string
@@ -18,26 +19,20 @@ interface WizardState {
   vatNumber:           string
   vatRegistered:       boolean
   companyRegNumber:    string
-  // Step 3
-  adminName:           string
-  adminEmail:          string
-  adminPassword:       string
-  adminConfirmPassword: string
-  // Step 4
-  licenceSeats:        number
-  featurePO:           boolean
-  featureResourcePlanning: boolean
-  featureExpenses:     boolean
-  featureXero:         boolean
-  featureOnedrive:     boolean
+  // Step 3 — licence
+  licenceSeats:             number
+  featurePO:                boolean
+  featureResourcePlanning:  boolean
+  featureExpenses:          boolean
+  featureXero:              boolean
+  featureOnedrive:          boolean
 }
 
-function emptyState(): WizardState {
+function emptyState(): MigrateState {
   return {
     domain: "", verificationToken: "", domainVerified: false,
     companyName: "", companyLegalName: "", companyAddress: "",
     companyPhone: "", vatNumber: "", vatRegistered: false, companyRegNumber: "",
-    adminName: "", adminEmail: "", adminPassword: "", adminConfirmPassword: "",
     licenceSeats: 5,
     featurePO: true, featureResourcePlanning: true, featureExpenses: true,
     featureXero: false, featureOnedrive: false,
@@ -50,60 +45,60 @@ function generateToken(): string {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 32)
 }
 
-function validatePassword(pw: string): string[] {
-  const errors: string[] = []
-  if (pw.length < 14)          errors.push("At least 14 characters")
-  if (!/[A-Z]/.test(pw))       errors.push("At least one uppercase letter")
-  if (!/[a-z]/.test(pw))       errors.push("At least one lowercase letter")
-  if (!/[0-9]/.test(pw))       errors.push("At least one number")
-  if (!/[^A-Za-z0-9]/.test(pw)) errors.push("At least one special character")
-  return errors
-}
-
-const STEP_LABELS = [
-  "Domain",
-  "Organisation",
-  "Admin User",
-  "Licence",
-  "Complete",
-]
+const STEP_LABELS = ["Domain", "Organisation", "Licence", "Complete"]
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function SetupPage() {
-  const router = useRouter()
-  const [step, setStep] = useState(1)
-  const [state, setState] = useState<WizardState>(emptyState)
-  const [checking, setChecking] = useState(true)
+export default function MigratePage() {
+  const router  = useRouter()
+  const { update } = useSession()
+  const [step,     setStep]     = useState(1)
+  const [state,    setState]    = useState<MigrateState>(emptyState)
+  const [loading,  setLoading]  = useState(true)
 
-  // If already configured → dashboard.
-  // If users exist but domain not configured → legacy instance; send admin to /login
-  // so they can authenticate and be redirected to /setup/migrate automatically.
+  // Load pre-fill data from the server
   useEffect(() => {
-    fetch("/api/setup")
-      .then(r => r.json())
-      .then(data => {
-        if (data.configured) {
+    fetch("/api/setup/migrate")
+      .then(r => {
+        if (r.status === 401 || r.status === 403) {
+          // Not an ADMIN — redirect to dashboard
           router.replace("/dashboard")
-        } else if (data.hasUsers) {
-          // Existing instance that hasn't run the migration wizard yet.
-          // The ADMIN must log in first; the migration redirect will kick in.
-          router.replace("/login")
-        } else {
-          setChecking(false)
+          return null
         }
+        return r.json()
       })
-      .catch(() => setChecking(false))
+      .then(data => {
+        if (!data) return
+        setState(prev => ({
+          ...prev,
+          domain:                  data.detectedDomain          ?? "",
+          companyName:             data.companyName             ?? "",
+          companyLegalName:        data.companyLegalName        ?? "",
+          companyAddress:          data.companyAddress          ?? "",
+          companyPhone:            data.companyPhone            ?? "",
+          vatNumber:               data.vatNumber               ?? "",
+          vatRegistered:           data.vatRegistered           ?? false,
+          companyRegNumber:        data.companyRegNumber        ?? "",
+          licenceSeats:            data.licenceSeats            ?? 5,
+          featurePO:               data.feature_po              ?? true,
+          featureResourcePlanning: data.feature_resource_planning ?? true,
+          featureExpenses:         data.feature_expenses         ?? true,
+          featureXero:             data.feature_xero             ?? false,
+          featureOnedrive:         data.feature_onedrive         ?? false,
+        }))
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
   }, [router])
 
-  function set<K extends keyof WizardState>(key: K, value: WizardState[K]) {
+  function set<K extends keyof MigrateState>(key: K, value: MigrateState[K]) {
     setState(prev => ({ ...prev, [key]: value }))
   }
 
-  if (checking) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <p className="text-sm text-gray-400">Checking setup status…</p>
+        <p className="text-sm text-gray-400">Loading migration wizard…</p>
       </div>
     )
   }
@@ -114,13 +109,16 @@ export default function SetupPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white">Tech Timesheet</h1>
-          <p className="mt-2 text-slate-300">First-time setup wizard</p>
+          <p className="mt-2 text-slate-300">Domain configuration — existing instance</p>
+          <p className="mt-1 text-slate-400 text-sm">
+            Your instance needs a verified domain before you can continue. This does not affect any existing data.
+          </p>
         </div>
 
         {/* Step indicator */}
         <div className="flex items-center justify-between mb-8">
           {STEP_LABELS.map((label, i) => {
-            const n = i + 1
+            const n         = i + 1
             const active    = n === step
             const completed = n < step
             return (
@@ -147,11 +145,10 @@ export default function SetupPage() {
 
         {/* Step content */}
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
-          {step === 1 && <Step1Domain state={state} set={set} onNext={() => setStep(2)} />}
-          {step === 2 && <Step2Org    state={state} set={set} onNext={() => setStep(3)} onBack={() => setStep(1)} />}
-          {step === 3 && <Step3Admin  state={state} set={set} onNext={() => setStep(4)} onBack={() => setStep(2)} />}
-          {step === 4 && <Step4Licence state={state} set={set} onNext={() => setStep(5)} onBack={() => setStep(3)} />}
-          {step === 5 && <Step5Complete state={state} onBack={() => setStep(4)} />}
+          {step === 1 && <MigrateStep1Domain  state={state} set={set} onNext={() => setStep(2)} />}
+          {step === 2 && <MigrateStep2Org     state={state} set={set} onNext={() => setStep(3)} onBack={() => setStep(1)} />}
+          {step === 3 && <MigrateStep3Licence state={state} set={set} onNext={() => setStep(4)} onBack={() => setStep(2)} />}
+          {step === 4 && <MigrateStep4Complete state={state} onBack={() => setStep(3)} update={update} />}
         </div>
       </div>
     </div>
@@ -160,11 +157,11 @@ export default function SetupPage() {
 
 // ─── Step 1: Domain ───────────────────────────────────────────────────────────
 
-function Step1Domain({
+function MigrateStep1Domain({
   state, set, onNext,
-}: { state: WizardState; set: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void; onNext: () => void }) {
+}: { state: MigrateState; set: <K extends keyof MigrateState>(k: K, v: MigrateState[K]) => void; onNext: () => void }) {
   const [verifying, setVerifying] = useState(false)
-  const [error, setError] = useState("")
+  const [error,     setError]     = useState("")
 
   function generateNew() {
     set("verificationToken", generateToken())
@@ -197,9 +194,9 @@ function Step1Domain({
 
   return (
     <div className="p-8">
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Domain Registration</h2>
+      <h2 className="text-xl font-bold text-gray-900 mb-1">Domain Verification</h2>
       <p className="text-sm text-gray-500 mb-6">
-        Verify ownership of your organisation&apos;s domain via a DNS TXT record.
+        Verify ownership of your organisation&apos;s domain via a DNS TXT record. The value below was detected from your email address — update it if needed.
       </p>
 
       <div className="space-y-4">
@@ -208,9 +205,9 @@ function Step1Domain({
           <input
             type="text"
             className="input"
-            placeholder="e.g. tech-timesheet.com"
+            placeholder="e.g. example.com"
             value={state.domain}
-            onChange={e => { set("domain", e.target.value); set("domainVerified", false) }}
+            onChange={e => { set("domain", e.target.value); set("domainVerified", false); set("verificationToken", "") }}
           />
         </div>
 
@@ -253,18 +250,18 @@ function Step1Domain({
 
         <div className="flex gap-3 pt-2">
           {state.verificationToken && !state.domainVerified && (
-            <button
-              onClick={verifyDomain}
-              disabled={verifying || !state.domain.trim()}
-              className="btn-primary btn"
-            >
-              {verifying ? "Verifying…" : "Verify DNS"}
-            </button>
-          )}
-          {state.verificationToken && !state.domainVerified && (
-            <button onClick={generateNew} className="btn-secondary btn text-sm">
-              New token
-            </button>
+            <>
+              <button
+                onClick={verifyDomain}
+                disabled={verifying || !state.domain.trim()}
+                className="btn-primary btn"
+              >
+                {verifying ? "Verifying…" : "Verify DNS"}
+              </button>
+              <button onClick={generateNew} className="btn-secondary btn text-sm">
+                New token
+              </button>
+            </>
           )}
           {state.domainVerified && (
             <button onClick={onNext} className="btn-primary btn">
@@ -279,15 +276,15 @@ function Step1Domain({
 
 // ─── Step 2: Organisation Details ─────────────────────────────────────────────
 
-function Step2Org({
+function MigrateStep2Org({
   state, set, onNext, onBack,
-}: { state: WizardState; set: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void; onNext: () => void; onBack: () => void }) {
+}: { state: MigrateState; set: <K extends keyof MigrateState>(k: K, v: MigrateState[K]) => void; onNext: () => void; onBack: () => void }) {
   const canContinue = state.companyName.trim().length > 0
 
   return (
     <div className="p-8">
       <h2 className="text-xl font-bold text-gray-900 mb-1">Organisation Details</h2>
-      <p className="text-sm text-gray-500 mb-6">This information appears on invoices and documents.</p>
+      <p className="text-sm text-gray-500 mb-6">Confirm or update your organisation information. This information appears on invoices and documents.</p>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="col-span-2">
@@ -328,103 +325,23 @@ function Step2Org({
   )
 }
 
-// ─── Step 3: Admin User ───────────────────────────────────────────────────────
+// ─── Step 3: Licence ──────────────────────────────────────────────────────────
 
-function Step3Admin({
+function MigrateStep3Licence({
   state, set, onNext, onBack,
-}: { state: WizardState; set: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void; onNext: () => void; onBack: () => void }) {
-  const pwErrors             = validatePassword(state.adminPassword)
-  const emailDomain          = state.adminEmail.split("@")[1]?.toLowerCase() ?? ""
-  const actualDomainMismatch = state.adminEmail.includes("@") && emailDomain !== state.domain
-  const passwordMatch        = state.adminPassword === state.adminConfirmPassword
-  const canContinue          = (
-    state.adminName.trim() &&
-    state.adminEmail.trim() &&
-    !actualDomainMismatch &&
-    pwErrors.length === 0 &&
-    passwordMatch
-  )
-
-  return (
-    <div className="p-8">
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Administrator Account</h2>
-      <p className="text-sm text-gray-500 mb-6">
-        This account will have full admin access. Email must use <strong>@{state.domain}</strong>.
-      </p>
-
-      <div className="space-y-4">
-        <div>
-          <label className="label">Full name <span className="text-red-500">*</span></label>
-          <input type="text" className="input" value={state.adminName} onChange={e => set("adminName", e.target.value)} />
-        </div>
-        <div>
-          <label className="label">Email address <span className="text-red-500">*</span></label>
-          <input
-            type="email"
-            className="input"
-            placeholder={`admin@${state.domain}`}
-            value={state.adminEmail}
-            onChange={e => set("adminEmail", e.target.value)}
-          />
-          {actualDomainMismatch && (
-            <p className="text-xs text-red-600 mt-1">Must use @{state.domain}</p>
-          )}
-        </div>
-        <div>
-          <label className="label">Password <span className="text-red-500">*</span></label>
-          <input
-            type="password"
-            className="input"
-            autoComplete="new-password"
-            value={state.adminPassword}
-            onChange={e => set("adminPassword", e.target.value)}
-          />
-          {state.adminPassword && pwErrors.length > 0 && (
-            <ul className="mt-1 text-xs text-red-600 space-y-0.5">
-              {pwErrors.map(e => <li key={e}>• {e}</li>)}
-            </ul>
-          )}
-        </div>
-        <div>
-          <label className="label">Confirm password <span className="text-red-500">*</span></label>
-          <input
-            type="password"
-            className="input"
-            autoComplete="new-password"
-            value={state.adminConfirmPassword}
-            onChange={e => set("adminConfirmPassword", e.target.value)}
-          />
-          {state.adminConfirmPassword && !passwordMatch && (
-            <p className="text-xs text-red-600 mt-1">Passwords do not match</p>
-          )}
-        </div>
-      </div>
-
-      <div className="flex gap-3 pt-6">
-        <button onClick={onBack} className="btn-secondary btn">Back</button>
-        <button onClick={onNext} disabled={!canContinue} className="btn-primary btn">Continue</button>
-      </div>
-    </div>
-  )
-}
-
-// ─── Step 4: Licence ──────────────────────────────────────────────────────────
-
-function Step4Licence({
-  state, set, onNext, onBack,
-}: { state: WizardState; set: <K extends keyof WizardState>(k: K, v: WizardState[K]) => void; onNext: () => void; onBack: () => void }) {
-  const features: { key: keyof WizardState; label: string; description: string }[] = [
-    { key: "featurePO",               label: "Purchase Orders",       description: "Track POs against projects" },
-    { key: "featureResourcePlanning", label: "Resource Planning",     description: "Calendar-based team scheduling" },
-    { key: "featureExpenses",         label: "Expense Management",    description: "Log and approve expense claims" },
-    { key: "featureXero",             label: "Xero Integration",      description: "Sync invoices to Xero" },
-    { key: "featureOnedrive",         label: "OneDrive Integration",  description: "Attach documents from OneDrive" },
+}: { state: MigrateState; set: <K extends keyof MigrateState>(k: K, v: MigrateState[K]) => void; onNext: () => void; onBack: () => void }) {
+  const features: { key: keyof MigrateState; label: string; description: string }[] = [
+    { key: "featurePO",               label: "Purchase Orders",      description: "Track POs against projects" },
+    { key: "featureResourcePlanning", label: "Resource Planning",    description: "Calendar-based team scheduling" },
+    { key: "featureExpenses",         label: "Expense Management",   description: "Log and approve expense claims" },
+    { key: "featureXero",             label: "Xero Integration",     description: "Sync invoices to Xero" },
+    { key: "featureOnedrive",         label: "OneDrive Integration", description: "Attach documents from OneDrive" },
   ]
 
   return (
     <div className="p-8">
       <h2 className="text-xl font-bold text-gray-900 mb-1">Licence Configuration</h2>
-      <p className="text-sm text-gray-500 mb-6">Set user seat count and enable features for your organisation.</p>
+      <p className="text-sm text-gray-500 mb-6">Review and confirm your seat count and feature set.</p>
 
       <div className="space-y-6">
         <div>
@@ -444,11 +361,11 @@ function Step4Licence({
           <p className="text-sm font-medium text-gray-700 mb-3">Features</p>
           <div className="space-y-3">
             {features.map(({ key, label, description }) => (
-              <label key={key} className="flex items-start gap-3 cursor-pointer group">
+              <label key={key} className="flex items-start gap-3 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={!!state[key]}
-                  onChange={e => set(key, e.target.checked as WizardState[typeof key])}
+                  onChange={e => set(key, e.target.checked as MigrateState[typeof key])}
                   className="mt-0.5 rounded border-gray-300"
                 />
                 <div>
@@ -463,41 +380,42 @@ function Step4Licence({
 
       <div className="flex gap-3 pt-6">
         <button onClick={onBack} className="btn-secondary btn">Back</button>
-        <button onClick={onNext} className="btn-primary btn">Continue</button>
+        <button onClick={onNext} className="btn-primary btn">Review &amp; Complete</button>
       </div>
     </div>
   )
 }
 
-// ─── Step 5: Complete ─────────────────────────────────────────────────────────
+// ─── Step 4: Complete ─────────────────────────────────────────────────────────
 
-function Step5Complete({
-  state, onBack,
-}: { state: WizardState; onBack: () => void }) {
-  const router   = useRouter()
-  const [saving, setSaving]  = useState(false)
-  const [error,  setError]   = useState("")
+function MigrateStep4Complete({
+  state, onBack, update,
+}: {
+  state: MigrateState
+  onBack: () => void
+  update: (data: Record<string, unknown>) => Promise<unknown>
+}) {
+  const router  = useRouter()
+  const [saving, setSaving] = useState(false)
+  const [error,  setError]  = useState("")
 
-  async function launch() {
+  async function complete() {
     setSaving(true)
     setError("")
     try {
-      const res = await fetch("/api/setup", {
+      const res = await fetch("/api/setup/migrate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           domain:            state.domain,
           verificationToken: state.verificationToken,
           companyName:       state.companyName,
-          companyLegalName:  state.companyLegalName || undefined,
-          companyAddress:    state.companyAddress   || undefined,
-          companyPhone:      state.companyPhone     || undefined,
-          vatNumber:         state.vatNumber        || undefined,
+          companyLegalName:  state.companyLegalName  || undefined,
+          companyAddress:    state.companyAddress    || undefined,
+          companyPhone:      state.companyPhone      || undefined,
+          vatNumber:         state.vatNumber         || undefined,
           vatRegistered:     state.vatRegistered,
-          companyRegNumber:  state.companyRegNumber || undefined,
-          adminName:         state.adminName,
-          adminEmail:        state.adminEmail.toLowerCase(),
-          adminPassword:     state.adminPassword,
+          companyRegNumber:  state.companyRegNumber  || undefined,
           licenceSeats:      state.licenceSeats,
           features: {
             po:               state.featurePO,
@@ -510,12 +428,13 @@ function Step5Complete({
       })
       const data = await res.json()
       if (!res.ok) {
-        setError(data.error ?? "Setup failed. Please try again.")
+        setError(data.error ?? "Migration failed. Please try again.")
         setSaving(false)
         return
       }
-      // Redirect to login with admin email pre-filled
-      router.push(`/login?email=${encodeURIComponent(state.adminEmail.toLowerCase())}`)
+      // Clear the needsMigration flag from the JWT so middleware stops redirecting
+      await update({ needsMigration: false })
+      router.push("/dashboard")
     } catch {
       setError("Network error — please try again.")
       setSaving(false)
@@ -532,17 +451,21 @@ function Step5Complete({
 
   return (
     <div className="p-8">
-      <h2 className="text-xl font-bold text-gray-900 mb-1">Ready to Launch</h2>
-      <p className="text-sm text-gray-500 mb-6">Review your configuration and click Launch to complete setup.</p>
+      <h2 className="text-xl font-bold text-gray-900 mb-1">Ready to Complete</h2>
+      <p className="text-sm text-gray-500 mb-6">
+        Review the configuration below. Existing users, projects, and time entries will not be affected.
+      </p>
 
       <div className="space-y-4">
-        {/* Summary cards */}
         <div className="rounded-lg bg-slate-50 border border-slate-200 divide-y divide-slate-200 text-sm">
           <SummaryRow label="Domain"       value={state.domain} mono />
           <SummaryRow label="Organisation" value={state.companyName} />
-          <SummaryRow label="Admin email"  value={state.adminEmail} mono />
           <SummaryRow label="User seats"   value={String(state.licenceSeats)} />
           <SummaryRow label="Features"     value={enabledFeatures.length ? enabledFeatures.join(", ") : "None enabled"} />
+        </div>
+
+        <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-700">
+          <strong>Note:</strong> All existing users must have <span className="font-mono">@{state.domain}</span> email addresses. New users will be restricted to this domain.
         </div>
 
         {error && (
@@ -554,8 +477,8 @@ function Step5Complete({
 
       <div className="flex gap-3 pt-6">
         <button onClick={onBack} disabled={saving} className="btn-secondary btn">Back</button>
-        <button onClick={launch} disabled={saving} className="btn-primary btn px-6">
-          {saving ? "Setting up…" : "Launch Tech Timesheet"}
+        <button onClick={complete} disabled={saving} className="btn-primary btn px-6">
+          {saving ? "Completing migration…" : "Complete Migration"}
         </button>
       </div>
     </div>

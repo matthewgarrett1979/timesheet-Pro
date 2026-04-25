@@ -37,21 +37,25 @@ const setupSchema = z.object({
 })
 
 export async function GET() {
-  const settings = await db.appSettings.findUnique({
-    where: { id: "global" },
-    select: {
-      organizationDomain: true,
-      domainVerifiedAt:   true,
-      companyName:        true,
-    },
-  })
+  const [settings, userCount] = await Promise.all([
+    db.appSettings.findUnique({
+      where: { id: "global" },
+      select: {
+        organizationDomain: true,
+        domainVerifiedAt:   true,
+        companyName:        true,
+      },
+    }),
+    db.user.count(),
+  ])
 
   const configured = !!(settings?.organizationDomain && settings?.domainVerifiedAt)
 
   return NextResponse.json({
     configured,
-    orgName:   settings?.companyName  ?? null,
-    domain:    settings?.organizationDomain ?? null,
+    orgName:  settings?.companyName       ?? null,
+    domain:   settings?.organizationDomain ?? null,
+    hasUsers: userCount > 0,
   })
 }
 

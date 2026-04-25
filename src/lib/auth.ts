@@ -172,6 +172,21 @@ export const authOptions: NextAuthOptions = {
             console.error("[auth] audit failed (login_success):", auditErr)
           }
 
+          // Detect existing instances that haven't yet configured a domain.
+          // Only ADMIN accounts are redirected to the migration wizard.
+          let needsMigration = false
+          if (user.role === Role.ADMIN) {
+            try {
+              // orgSettings was already fetched above; reuse it if domain is absent
+              if (!orgSettings?.organizationDomain) {
+                const userCount = await db.user.count()
+                needsMigration = userCount > 0
+              }
+            } catch {
+              // Non-fatal — migration detection failure must not block login
+            }
+          }
+
           // Return the fields we need in the JWT. NextAuth merges these into
           // the User object received by the jwt() callback as `user`.
           return {
@@ -181,6 +196,7 @@ export const authOptions: NextAuthOptions = {
             role: user.role,
             mfaEnabled: user.mfaEnabled,
             mustChangePassword: user.mustChangePassword,
+            needsMigration,
           }
         } catch (err) {
           // Re-throw AccountLocked so NextAuth surfaces it to the client
@@ -213,6 +229,7 @@ export const authOptions: NextAuthOptions = {
         // mfaVerified starts true if MFA is not enabled on the account
         token.mfaVerified = !(user as { mfaEnabled: boolean }).mfaEnabled
         token.mustChangePassword = (user as { mustChangePassword: boolean }).mustChangePassword
+        token.needsMigration = (user as { needsMigration?: boolean }).needsMigration ?? false
       }
 
       // Client called update({ mfaVerified: true }) after TOTP/recovery success
@@ -223,6 +240,11 @@ export const authOptions: NextAuthOptions = {
       // Client called update({ mustChangePassword: false }) after successful password change
       if (trigger === "update" && session?.mustChangePassword === false) {
         token.mustChangePassword = false
+      }
+
+      // Client called update({ needsMigration: false }) after migration wizard completes
+      if (trigger === "update" && session?.needsMigration === false) {
+        token.needsMigration = false
       }
 
       return token
@@ -242,6 +264,7 @@ export const authOptions: NextAuthOptions = {
           mfaEnabled: token.mfaEnabled as boolean,
           mfaVerified: token.mfaVerified as boolean,
           mustChangePassword: (token.mustChangePassword as boolean) ?? false,
+          needsMigration: (token.needsMigration as boolean) ?? false,
         },
       }
     },
@@ -277,6 +300,3 @@ export const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   debug: process.env.NODE_ENV === "development",
 }
-
-
-

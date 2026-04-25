@@ -2,18 +2,26 @@
  * Next.js Edge Middleware — runs before every request.
  *
  * Responsibilities (in order):
- *   1. Setup gate — redirect to /setup if first-run cookie is absent
+ *   1. Setup gate — redirect to /setup if first-run cookie is absent and no
+ *      existing session (new instance detection)
  *   2. Security headers on every response (CSP, HSTS, Permissions-Policy, etc.)
  *   3. Authentication gate — redirect unauthenticated requests to /login
  *   4. MFA gate — redirect MFA-pending sessions to /mfa
- *   5. ADMIN-only route enforcement
+ *   5. Migration gate — redirect ADMIN with needsMigration to /setup/migrate
+ *   6. ADMIN-only route enforcement
  *
  * Rate limiting is handled per-route via Arcjet (see src/lib/rate-limit.ts).
  * This middleware runs on the Edge Runtime (no Node.js APIs).
  *
  * First-run detection: the POST /api/setup handler sets an `app_configured`
- * cookie on successful setup. Middleware checks for this cookie; if absent,
- * all non-setup/non-static paths are redirected to /setup.
+ * cookie on successful setup. Middleware checks for this cookie; if absent AND
+ * no NextAuth session cookie exists, it is a brand-new instance and all
+ * non-public/non-setup paths redirect to /setup.
+ *
+ * Legacy instance migration: when an ADMIN whose instance has no
+ * organizationDomain logs in, authorize() sets needsMigration=true in the JWT.
+ * Middleware then redirects all protected routes to /setup/migrate until the
+ * migration wizard completes and calls update({ needsMigration: false }).
  */
 import { NextRequest, NextResponse } from "next/server"
 import { getToken } from "next-auth/jwt"
@@ -48,26 +56,45 @@ const MANAGER_PATHS = [
 const MFA_PATH = "/mfa"
 const LOGIN_PATH = "/login"
 const CHANGE_PASSWORD_PATH = "/settings/change-password"
+const MIGRATE_PATH = "/setup/migrate"
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
 
   // ------------------------------------------------------------------
   // 1. Setup gate — must run before everything else.
-  //    If the app_configured cookie is absent and this is not already
-  //    a setup/static path, redirect to /setup.
+  //    Redirect to /setup if:
+  //    - app_configured cookie is absent (not yet set up), AND
+  //    - No NextAuth session cookie exists (not an authenticated legacy user)
+  //    - The path is not already a setup/static/public path
+  //
+  //    Using the session-cookie existence as a proxy for "authenticated"
+  //    avoids a DB round-trip on the Edge. Authenticated users in legacy
+  //    instances (pre-v3.2.0, no app_configured cookie) skip the gate and
+  //    are handled by the migration redirect below.
   // ------------------------------------------------------------------
   const isSetupPath = pathname === SETUP_PATH || pathname.startsWith(SETUP_PATH + "/")
   const isApiSetup  = pathname.startsWith("/api/setup")
   const isStatic    = pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname === "/robots.txt"
 
-  if (!isSetupPath && !isApiSetup && !isStatic) {
-    const configured = req.cookies.get("app_configured")?.value
-    if (!configured) {
+  const isPublic = PUBLIC_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(p + "/") || pathname.startsWith(p + "?")
+  )
+
+  if (!isSetupPath && !isApiSetup && !isStatic && !isPublic) {
+    const configured    = req.cookies.get("app_configured")?.value
+    // Check for either the standard or the __Secure- prefixed cookie name
+    const sessionCookie = req.cookies.get("next-auth.session-token")?.value
+                       ?? req.cookies.get("__Secure-next-auth.session-token")?.value
+
+    if (!configured && !sessionCookie) {
+      // Brand-new instance with no users — redirect to first-run wizard
       const setupUrl = req.nextUrl.clone()
       setupUrl.pathname = SETUP_PATH
       setupUrl.search = ""
-      return NextResponse.redirect(setupUrl)
+      const response = NextResponse.redirect(setupUrl)
+      applySecurityHeaders(response, req)
+      return response
     }
   }
 
@@ -76,11 +103,7 @@ export async function middleware(req: NextRequest) {
   // ------------------------------------------------------------------
   let response: NextResponse
 
-  const isPublic = PUBLIC_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(p + "/") || pathname.startsWith(p + "?")
-  )
-
-  if (isPublic) {
+  if (isPublic || isSetupPath || isApiSetup) {
     response = NextResponse.next()
   } else {
     // Retrieve the session token from the cookie (Edge-compatible)
@@ -116,6 +139,13 @@ export async function middleware(req: NextRequest) {
       const cpUrl = req.nextUrl.clone()
       cpUrl.pathname = CHANGE_PASSWORD_PATH
       response = NextResponse.redirect(cpUrl)
+    } else if (token.needsMigration === true) {
+      // ADMIN on a legacy instance that hasn't configured a domain yet.
+      // /setup/migrate is public (starts with /setup/), so protected routes
+      // are the only ones that reach this branch.
+      const migrateUrl = req.nextUrl.clone()
+      migrateUrl.pathname = MIGRATE_PATH
+      response = NextResponse.redirect(migrateUrl)
     } else if (
       ADMIN_PATHS.some((p) => pathname.startsWith(p)) &&
       token.role !== "ADMIN"
